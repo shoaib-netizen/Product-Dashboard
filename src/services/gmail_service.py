@@ -1,0 +1,199 @@
+"""
+Gmail Service - Handles Gmail API integration for fetching emails.
+"""
+import os
+import base64
+import json
+from datetime import datetime
+from email.utils import parsedate_to_datetime
+from typing import Optional
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+from config import Config
+
+
+class GmailService:
+    """
+    Service for interacting with Gmail API.
+    
+    Handles:
+    - Authentication (OAuth2)
+    - Fetching unread emails
+    - Marking emails as processed
+    """
+    
+    def __init__(self):
+        """Initialize Gmail service with authentication."""
+        self.creds = self._authenticate()
+        self.service = build('gmail', 'v1', credentials=self.creds)
+        self.processed_label = "PROCESSED_BY_AGENT"
+    
+    def _authenticate(self) -> Credentials:
+        """Authenticate with Gmail API using OAuth2."""
+        creds = None
+        
+        # Load existing token
+        if os.path.exists(Config.GMAIL_TOKEN_PATH):
+            creds = Credentials.from_authorized_user_file(
+                Config.GMAIL_TOKEN_PATH, 
+                Config.GMAIL_SCOPES
+            )
+        
+        # Refresh or create new credentials
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                if not os.path.exists(Config.GMAIL_CREDENTIALS_PATH):
+                    raise FileNotFoundError(
+                        f"Gmail credentials not found at {Config.GMAIL_CREDENTIALS_PATH}. "
+                        "Please download from Google Cloud Console."
+                    )
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    Config.GMAIL_CREDENTIALS_PATH, 
+                    Config.GMAIL_SCOPES
+                )
+                creds = flow.run_local_server(port=0)
+            
+            # Save credentials for future use
+            with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
+                token.write(creds.to_json())
+        
+        return creds
+    
+    def fetch_unread_emails(self, max_results: int = 10) -> list[dict]:
+        """
+        Fetch unread emails from inbox.
+        
+        Args:
+            max_results: Maximum number of emails to fetch
+            
+        Returns:
+            List of email dictionaries with subject, from, date, body
+        """
+        query = f"is:unread label:{Config.GMAIL_LABEL_FILTER}"
+        
+        if Config.FILTER_FROM_EMAIL:
+            query += f" from:{Config.FILTER_FROM_EMAIL}"
+        
+        try:
+            results = self.service.users().messages().list(
+                userId='me',
+                q=query,
+                maxResults=max_results
+            ).execute()
+            
+            messages = results.get('messages', [])
+            emails = []
+            
+            for msg in messages:
+                email_data = self._get_email_details(msg['id'])
+                if email_data:
+                    email_data['message_id'] = msg['id']
+                    emails.append(email_data)
+            
+            return emails
+            
+        except Exception as e:
+            print(f"[GmailService] Error fetching emails: {e}")
+            return []
+    
+    def _get_email_details(self, message_id: str) -> Optional[dict]:
+        """Get full details of a specific email."""
+        try:
+            msg = self.service.users().messages().get(
+                userId='me',
+                id=message_id,
+                format='full'
+            ).execute()
+            
+            headers = {h['name']: h['value'] for h in msg['payload']['headers']}
+            
+            # Extract body
+            body = self._extract_body(msg['payload'])
+            
+            # Parse date
+            date_str = headers.get('Date', '')
+            try:
+                date = parsedate_to_datetime(date_str).strftime('%Y-%m-%d')
+            except:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            return {
+                'subject': headers.get('Subject', 'No Subject'),
+                'from': headers.get('From', 'Unknown'),
+                'date': date,
+                'body': body
+            }
+            
+        except Exception as e:
+            print(f"[GmailService] Error getting email details: {e}")
+            return None
+    
+    def _extract_body(self, payload: dict) -> str:
+        """Extract email body from payload."""
+        body = ""
+        
+        if 'body' in payload and payload['body'].get('data'):
+            body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
+        elif 'parts' in payload:
+            for part in payload['parts']:
+                if part['mimeType'] == 'text/plain':
+                    if part['body'].get('data'):
+                        body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
+                        break
+                elif part['mimeType'] == 'multipart/alternative':
+                    body = self._extract_body(part)
+                    if body:
+                        break
+        
+        return body[:5000]  # Limit body length
+    
+    def mark_as_read(self, message_id: str) -> bool:
+        """Mark an email as read."""
+        try:
+            self.service.users().messages().modify(
+                userId='me',
+                id=message_id,
+                body={'removeLabelIds': ['UNREAD']}
+            ).execute()
+            return True
+        except Exception as e:
+            print(f"[GmailService] Error marking as read: {e}")
+            return False
+    
+    def add_label(self, message_id: str, label_name: str) -> bool:
+        """Add a label to an email (for tracking processed emails)."""
+        try:
+            # Get or create label
+            label_id = self._get_or_create_label(label_name)
+            if label_id:
+                self.service.users().messages().modify(
+                    userId='me',
+                    id=message_id,
+                    body={'addLabelIds': [label_id]}
+                ).execute()
+                return True
+        except Exception as e:
+            print(f"[GmailService] Error adding label: {e}")
+        return False
+    
+    def _get_or_create_label(self, label_name: str) -> Optional[str]:
+        """Get label ID or create new label."""
+        try:
+            results = self.service.users().labels().list(userId='me').execute()
+            for label in results.get('labels', []):
+                if label['name'] == label_name:
+                    return label['id']
+            
+            # Create label if not exists
+            label = self.service.users().labels().create(
+                userId='me',
+                body={'name': label_name}
+            ).execute()
+            return label['id']
+        except:
+            return None

@@ -1,93 +1,205 @@
-# Product-Dashboard
+# 📧 Email-to-Sheets Agent
 
+An **Agentic AI** application that automatically monitors Gmail, intelligently parses emails using Groq LLM, and stores structured task data in Google Sheets.
 
+## 🎯 What Makes This "Agentic AI"?
 
-## Getting started
+Unlike simple automation that relies on rigid rules:
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+| Feature | Simple Automation | This Agent |
+|---------|------------------|------------|
+| Email Parsing | Regex patterns | LLM understands context |
+| Data Extraction | Fixed templates | Handles any email format |
+| Team Detection | Manual mapping | AI infers from content |
+| Adaptability | Breaks on changes | Adapts intelligently |
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+The **EmailParserAgent** uses Groq's LLM to understand email context and extract structured data, making it robust to format variations.
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## 🏗️ Project Structure
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/onescreensolutions/product-dashboard.git
-git branch -M main
-git push -uf origin main
+email-to-sheets-agent/
+├── config.py                 # Configuration management
+├── main.py                   # Application entry point
+├── scheduler.py              # Background job scheduler
+├── requirements.txt          # Python dependencies
+│
+├── src/
+│   ├── agents/
+│   │   ├── __init__.py
+│   │   └── email_parser_agent.py    # 🤖 AI Agent (Groq LLM)
+│   │
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── gmail_service.py         # Gmail API integration
+│   │   └── sheets_service.py        # Google Sheets API
+│   │
+│   └── utils/
+│       ├── __init__.py
+│       └── logger.py                # Logging utilities
+│
+├── render.yaml               # Render deployment blueprint
+├── Procfile                  # Process definitions
+├── runtime.txt               # Python version
+└── .env.example              # Environment template
 ```
 
-## Integrate with your tools
+## 📊 Output Format
 
-* [Set up project integrations](https://gitlab.com/onescreensolutions/product-dashboard/-/settings/integrations)
+Emails are parsed and stored with these fields:
 
-## Collaborate with your team
+| SN | Task Name | Description | Status | Date of Query | Date of Solution | Request Came From | Team Origin |
+|----|-----------|-------------|--------|---------------|------------------|-------------------|-------------|
+| 1  | API Bug Fix | Users reporting 500 errors... | Pending | 2026-03-26 | | John <john@company.com> | Engineering |
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## 🚀 Quick Start
 
-## Test and Deploy
+### Prerequisites
 
-Use the built-in continuous integration in GitLab.
+- Python 3.11+
+- Google Cloud Project with Gmail & Sheets APIs enabled
+- Groq API key
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+### 1. Clone & Install
 
-***
+```bash
+git clone <your-repo>
+cd email-to-sheets-agent
+python -m venv venv
+venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+```
 
-# Editing this README
+### 2. Google Cloud Setup
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+#### Gmail API (OAuth2)
+1. Go to [Google Cloud Console](https://console.cloud.google.com)
+2. Create a new project or select existing
+3. Enable **Gmail API**
+4. Create OAuth 2.0 credentials (Desktop app)
+5. Download as `credentials.json`
 
-## Suggestions for a good README
+#### Google Sheets API (Service Account)
+1. Enable **Google Sheets API**
+2. Create Service Account
+3. Download JSON key as `service_account.json`
+4. Share your Google Sheet with the service account email
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### 3. Configure Environment
 
-## Name
-Choose a self-explaining name for your project.
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+### 4. Create Google Sheet
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Create a new Google Sheet and copy the ID from the URL:
+```
+https://docs.google.com/spreadsheets/d/[SHEET_ID_HERE]/edit
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+### 5. Run Locally
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```bash
+# Process emails once
+python main.py
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+# Watch mode (continuous monitoring)
+python main.py --watch
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+# Start web server
+python main.py --server
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+## ☁️ Deploy to Render
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### Option 1: Blueprint (Recommended)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+1. Push code to GitHub
+2. Go to [Render Dashboard](https://dashboard.render.com)
+3. New → Blueprint
+4. Connect your repo
+5. Render will use `render.yaml` automatically
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Option 2: Manual Setup
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+**Background Worker:**
+```
+Build: pip install -r requirements.txt
+Start: python scheduler.py
+```
 
-## License
-For open source projects, say how it is licensed.
+**Environment Variables (Set in Render Dashboard):**
+- `GROQ_API_KEY` - Your Groq API key
+- `GOOGLE_SHEET_ID` - Your Google Sheet ID  
+- `GOOGLE_CREDENTIALS_JSON` - Paste entire service account JSON
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Gmail OAuth on Render
+
+Since Gmail OAuth requires browser interaction for first auth:
+
+1. Run locally first: `python main.py`
+2. Complete OAuth flow in browser
+3. Copy generated `token.json` content
+4. Store as environment variable or use service account approach
+
+## 🔧 Configuration Options
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GROQ_API_KEY` | Groq API key | Required |
+| `GROQ_MODEL` | LLM model to use | `llama-3.1-70b-versatile` |
+| `GOOGLE_SHEET_ID` | Target spreadsheet ID | Required |
+| `GOOGLE_SHEET_NAME` | Worksheet name | `Sheet1` |
+| `GMAIL_LABEL_FILTER` | Gmail label to monitor | `INBOX` |
+| `GMAIL_CHECK_INTERVAL_MINUTES` | Check frequency | `5` |
+| `FILTER_FROM_EMAIL` | Only process from this sender | All |
+
+## 🧪 Testing
+
+```bash
+# Test email parsing
+python -c "
+from src.agents import EmailParserAgent
+agent = EmailParserAgent()
+result = agent.parse_email({
+    'subject': 'Need help with dashboard',
+    'from': 'alice@marketing.com',
+    'date': '2026-03-26',
+    'body': 'Hi, the sales dashboard is showing wrong numbers. Can you fix it?'
+})
+print(result)
+"
+```
+
+## 📁 API Endpoints (Server Mode)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Service info |
+| `/health` | GET | Health check |
+| `/process` | POST | Trigger email processing |
+| `/status` | GET | Current configuration |
+
+## 🛠️ Troubleshooting
+
+**"GROQ_API_KEY is required"**
+- Check your `.env` file has the key set
+- Verify no extra spaces around the value
+
+**"Gmail credentials not found"**
+- Download OAuth credentials from Google Cloud Console
+- Save as `credentials.json` in project root
+
+**"Permission denied" on Sheets**
+- Share the Google Sheet with your service account email
+- Email looks like: `name@project.iam.gserviceaccount.com`
+
+## 📄 License
+
+MIT License - Feel free to use for your portfolio!
+
+---
+
+Built with 🤖 Groq LLM + Gmail API + Google Sheets API

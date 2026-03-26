@@ -1,0 +1,22 @@
+# Gmail API
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+google-api-python-client>=2.140.0
+
+# Google Sheets API
+gspread>=6.1.0
+
+# Groq LLM
+groq>=0.9.0
+
+# Environment variables
+python-dotenv>=1.0.1
+
+# Web server (for Render deployment)
+flask>=3.0.3
+gunicorn>=22.0.0
+
+# Utilities
+pydantic>=2.8.0
+schedule>=1.2.2

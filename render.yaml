@@ -1,0 +1,38 @@
+# Render Blueprint for Email-to-Sheets Agent
+# Deploy with: render blueprint apply
+
+services:
+  # Background Worker - Runs the email scheduler
+  - type: worker
+    name: email-agent-worker
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python scheduler.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: GROQ_API_KEY
+        sync: false  # Set in Render dashboard
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false  # JSON string of service account
+      - key: GMAIL_CHECK_INTERVAL_MINUTES
+        value: "5"
+
+  # Optional: Web service for manual triggers and health checks
+  - type: web
+    name: email-agent-web
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn main:create_flask_app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GOOGLE_SHEET_ID
+        sync: false
+      - key: GOOGLE_CREDENTIALS_JSON
+        sync: false
+    healthCheckPath: /health
