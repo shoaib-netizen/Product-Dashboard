@@ -21,16 +21,24 @@ class GoogleSheetsService:
     - Managing sheet structure
     """
     
-    # Expected headers in the sheet
+    # Expected headers in the sheet - Product Engineering Team Format
     HEADERS = [
         "SN",
+        "Email Subject",
+        "Sender Name",
+        "Sender Email",
+        "Recipient Email",
+        "Date Sent",
+        "Date Received",
         "Task Name",
-        "Description", 
-        "Status",
-        "Date of Query",
-        "Date of Solution",
-        "Request Came From",
-        "Team where request originated from"
+        "Email Summary",
+        "Team Origin",
+        "Reply Status",
+        "Replied By",
+        "Reply Date",
+        "Reply Summary",
+        "Task Status",
+        "Date of Solution"
     ]
     
     def __init__(self):
@@ -80,13 +88,28 @@ class GoogleSheetsService:
             )
     
     def _ensure_headers(self):
-        """Ensure headers exist in the first row."""
+        """Ensure headers exist in the first row with proper formatting."""
         try:
             first_row = self.sheet.row_values(1)
             if not first_row or first_row != self.HEADERS:
-                self.sheet.update('A1:H1', [self.HEADERS])
-        except:
-            self.sheet.update('A1:H1', [self.HEADERS])
+                # Update headers
+                self.sheet.update('A1:P1', [self.HEADERS])
+                
+                # Format header row (blue background, white bold text, centered)
+                self.sheet.format('A1:P1', {
+                    'backgroundColor': {'red': 0.2, 'green': 0.4, 'blue': 0.8},
+                    'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}},
+                    'horizontalAlignment': 'CENTER',
+                    'verticalAlignment': 'MIDDLE'
+                })
+                
+                # Freeze header row
+                self.sheet.freeze(rows=1)
+                
+                print(f"[SheetsService] Headers formatted with 16 columns")
+        except Exception as e:
+            print(f"[SheetsService] Header setup: {e}")
+            self.sheet.update('A1:P1', [self.HEADERS])
     
     def _get_next_sn(self) -> int:
         """Get the next serial number."""
@@ -100,7 +123,7 @@ class GoogleSheetsService:
     
     def add_task(self, task: TaskData) -> bool:
         """
-        Add a task to the Google Sheet.
+        Add a task to the Google Sheet with enhanced email tracking.
         
         Args:
             task: TaskData object with task information
@@ -113,22 +136,52 @@ class GoogleSheetsService:
             
             row = [
                 str(sn),
+                task.email_subject,
+                task.sender_name,
+                task.sender_email,
+                task.recipient_email,
+                task.date_sent,
+                task.date_received,
                 task.task_name,
-                task.description,
+                task.email_summary,
+                task.team_origin,
+                task.reply_status,
+                task.replied_by,
+                task.reply_date,
+                task.reply_summary,
                 task.status,
-                task.date_of_query,
-                task.date_of_solution,
-                task.request_came_from,
-                task.team_origin
+                task.date_of_solution
             ]
             
             self.sheet.append_row(row, value_input_option='USER_ENTERED')
+            
+            # Apply conditional formatting based on reply status
+            row_num = sn + 1  # +1 for header row
+            self._apply_row_formatting(row_num, task.reply_status)
+            
             print(f"[SheetsService] Added task SN#{sn}: {task.task_name}")
             return True
             
         except Exception as e:
             print(f"[SheetsService] Error adding task: {e}")
             return False
+    
+    def _apply_row_formatting(self, row_num: int, reply_status: str):
+        """Apply conditional formatting based on reply status."""
+        try:
+            # Color code based on reply status
+            if reply_status == "Replied":
+                bg_color = {'red': 0.85, 'green': 0.95, 'blue': 0.85}  # Light green
+            elif reply_status == "Pending":
+                bg_color = {'red': 1.0, 'green': 0.95, 'blue': 0.8}  # Light yellow
+            else:  # No Reply
+                bg_color = {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White
+                
+            self.sheet.format(f'A{row_num}:P{row_num}', {
+                'backgroundColor': bg_color
+            })
+        except:
+            pass  # Silently fail if formatting doesn't work
     
     def add_tasks_batch(self, tasks: list[TaskData]) -> int:
         """

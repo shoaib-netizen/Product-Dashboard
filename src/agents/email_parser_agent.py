@@ -12,13 +12,28 @@ from config import Config
 
 class TaskData(BaseModel):
     """Structured task data extracted from email."""
+    # Email Metadata
+    email_subject: str = Field(description="Email subject line")
+    sender_name: str = Field(description="Sender's name")
+    sender_email: str = Field(description="Sender's email address")
+    recipient_email: str = Field(description="Recipient's email address")
+    date_sent: str = Field(description="Date/time email was sent (YYYY-MM-DD HH:MM)")
+    date_received: str = Field(description="Date/time email was received (YYYY-MM-DD HH:MM)")
+    
+    # Task Information
     task_name: str = Field(description="Brief name/title of the task")
-    description: str = Field(description="Detailed description of the task/query")
-    status: str = Field(default="Pending", description="Current status: Pending, In Progress, Completed")
-    date_of_query: str = Field(description="Date when query was received (YYYY-MM-DD)")
-    date_of_solution: str = Field(default="", description="Date when resolved (empty if pending)")
-    request_came_from: str = Field(description="Person/email who sent the request")
+    email_summary: str = Field(description="Short summary of email body (2-3 sentences)")
     team_origin: str = Field(description="Team/department where request originated")
+    
+    # Reply Tracking
+    reply_status: str = Field(default="No Reply", description="Replied, Pending, No Reply")
+    replied_by: str = Field(default="", description="Who replied to the email")
+    reply_date: str = Field(default="", description="Date/time of reply (YYYY-MM-DD HH:MM)")
+    reply_summary: str = Field(default="", description="Summary of the reply")
+    
+    # Legacy fields for compatibility
+    status: str = Field(default="Pending", description="Task status: Pending, In Progress, Completed")
+    date_of_solution: str = Field(default="", description="Date when resolved (empty if pending)")
 
 
 class EmailParserAgent:
@@ -31,32 +46,48 @@ class EmailParserAgent:
     3. Returns standardized task information for Google Sheets
     """
     
-    SYSTEM_PROMPT = """You are an intelligent email parser agent. Your job is to extract structured task/query information from emails.
+    SYSTEM_PROMPT = """You are an intelligent email parser agent for a product engineering team. Extract structured information from emails.
 
-Extract the following fields:
-1. task_name: A brief, clear title for the task/query (max 50 chars)
-2. description: Full description of what is being requested
-3. status: Default to "Pending" unless email indicates otherwise
-4. date_of_query: The date the email was sent (format: YYYY-MM-DD)
-5. date_of_solution: Leave empty if not resolved
-6. request_came_from: The sender's name and email
-7. team_origin: Infer the team/department from email signature, domain, or content. If unclear, use "Unknown"
+Extract these fields:
+1. email_subject: The email subject line
+2. sender_name: Sender's full name (extract from email if available)
+3. sender_email: Sender's email address
+4. recipient_email: Recipient's email address  
+5. date_sent: Date/time sent (YYYY-MM-DD HH:MM format)
+6. date_received: Date/time received (YYYY-MM-DD HH:MM format)
+7. task_name: Brief, clear title for the task/request (max 50 chars)
+8. email_summary: 2-3 sentence summary of the email body
+9. team_origin: Infer team/department (Engineering, Product, Support, Marketing, Sales, Unknown)
+10. reply_status: "No Reply" (default for initial emails)
+11. replied_by: "" (empty for initial emails)
+12. reply_date: "" (empty for initial emails)
+13. reply_summary: "" (empty for initial emails)
+14. status: "Pending" (task completion status)
+15. date_of_solution: "" (empty if not resolved)
 
 Be intelligent:
-- Look for context clues to determine the team
-- Extract the core request even if buried in pleasantries
-- If multiple tasks in one email, focus on the primary request
-- Use professional, concise language for task_name
+- Extract sender name from "From" field or email signature
+- Infer team from email domain, signature, or content context
+- Create concise, actionable task names
+- Summarize the core request clearly
 
 Respond ONLY with valid JSON matching this structure:
 {
+    "email_subject": "string",
+    "sender_name": "string",
+    "sender_email": "email@domain.com",
+    "recipient_email": "email@domain.com",
+    "date_sent": "YYYY-MM-DD HH:MM",
+    "date_received": "YYYY-MM-DD HH:MM",
     "task_name": "string",
-    "description": "string", 
-    "status": "Pending|In Progress|Completed",
-    "date_of_query": "YYYY-MM-DD",
-    "date_of_solution": "",
-    "request_came_from": "Name <email>",
-    "team_origin": "string"
+    "email_summary": "string",
+    "team_origin": "string",
+    "reply_status": "No Reply",
+    "replied_by": "",
+    "reply_date": "",
+    "reply_summary": "",
+    "status": "Pending",
+    "date_of_solution": ""
 }"""
 
     def __init__(self):
@@ -101,28 +132,41 @@ Respond ONLY with valid JSON matching this structure:
     
     def _format_email_for_parsing(self, email_data: dict) -> str:
         """Format email data into a prompt for the LLM."""
-        return f"""Parse this email:
+        return f"""Parse this email for the product engineering team:
 
-FROM: {email_data.get('from', 'Unknown')}
-DATE: {email_data.get('date', datetime.now().strftime('%Y-%m-%d'))}
 SUBJECT: {email_data.get('subject', 'No Subject')}
+FROM: {email_data.get('from', 'Unknown')}
+TO: {email_data.get('to', 'Unknown')}
+DATE SENT: {email_data.get('date_sent', datetime.now().strftime('%Y-%m-%d %H:%M'))}
+DATE RECEIVED: {email_data.get('date_received', datetime.now().strftime('%Y-%m-%d %H:%M'))}
 
 BODY:
 {email_data.get('body', 'No content')}
 
 ---
-Extract the task information as JSON."""
+Extract all the email information as JSON. This is an incoming email, so reply_status should be "No Reply" and reply fields should be empty."""
 
     def _fallback_parse(self, email_data: dict) -> TaskData:
         """Fallback parsing when LLM fails - uses basic extraction."""
+        sender_email = email_data.get('from', 'unknown@unknown.com')
+        date_str = email_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        
         return TaskData(
+            email_subject=email_data.get('subject', 'No Subject'),
+            sender_name=sender_email.split('<')[0].strip() if '<' in sender_email else sender_email,
+            sender_email=sender_email,
+            recipient_email=email_data.get('to', 'Unknown'),
+            date_sent=date_str + " 00:00" if len(date_str) == 10 else date_str,
+            date_received=date_str + " 00:00" if len(date_str) == 10 else date_str,
             task_name=email_data.get('subject', 'Email Task')[:50],
-            description=email_data.get('body', '')[:500],
+            email_summary=email_data.get('body', '')[:200],
+            team_origin="Unknown",
+            reply_status="No Reply",
+            replied_by="",
+            reply_date="",
+            reply_summary="",
             status="Pending",
-            date_of_query=email_data.get('date', datetime.now().strftime('%Y-%m-%d')),
-            date_of_solution="",
-            request_came_from=email_data.get('from', 'Unknown'),
-            team_origin="Unknown"
+            date_of_solution=""
         )
     
     def batch_parse(self, emails: list[dict]) -> list[TaskData]:

@@ -102,7 +102,7 @@ class GmailService:
             return []
     
     def _get_email_details(self, message_id: str) -> Optional[dict]:
-        """Get full details of a specific email."""
+        """Get full details of a specific email with enhanced metadata."""
         try:
             msg = self.service.users().messages().get(
                 userId='me',
@@ -115,18 +115,29 @@ class GmailService:
             # Extract body
             body = self._extract_body(msg['payload'])
             
-            # Parse date
+            # Parse date with time
             date_str = headers.get('Date', '')
             try:
-                date = parsedate_to_datetime(date_str).strftime('%Y-%m-%d')
+                dt = parsedate_to_datetime(date_str)
+                date_sent = dt.strftime('%Y-%m-%d %H:%M')
+                date_received = dt.strftime('%Y-%m-%d %H:%M')  # Approximate
             except:
-                date = datetime.now().strftime('%Y-%m-%d')
+                now = datetime.now()
+                date_sent = now.strftime('%Y-%m-%d %H:%M')
+                date_received = now.strftime('%Y-%m-%d %H:%M')
+            
+            # Extract recipient (To field)
+            to_field = headers.get('To', headers.get('Delivered-To', 'Unknown'))
             
             return {
                 'subject': headers.get('Subject', 'No Subject'),
                 'from': headers.get('From', 'Unknown'),
-                'date': date,
-                'body': body
+                'to': to_field,
+                'date': date_sent.split(' ')[0],  # Keep for backward compatibility
+                'date_sent': date_sent,
+                'date_received': date_received,
+                'body': body,
+                'thread_id': msg.get('threadId', '')
             }
             
         except Exception as e:
