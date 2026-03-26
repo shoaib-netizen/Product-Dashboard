@@ -105,6 +105,102 @@ class GmailService:
             print(f"[GmailService] Error fetching emails: {e}")
             return []
     
+    def fetch_emails_by_date_range(self, start_date: str, end_date: str = None, max_results: int = 500) -> list[dict]:
+        """
+        Fetch emails within a date range (for historical import).
+        
+        Args:
+            start_date: Start date in YYYY/MM/DD format (e.g., "2026/01/01")
+            end_date: End date in YYYY/MM/DD format (optional, defaults to today)
+            max_results: Maximum number of emails to fetch
+            
+        Returns:
+            List of email dictionaries
+        """
+        from datetime import datetime
+        
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y/%m/%d')
+        
+        query = f"after:{start_date} before:{end_date} label:{Config.GMAIL_LABEL_FILTER}"
+        
+        # Filter for Product Engineering emails only
+        if Config.FILTER_PRODUCT_ENGINEERING:
+            query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
+        
+        if Config.FILTER_FROM_EMAIL:
+            query += f" from:{Config.FILTER_FROM_EMAIL}"
+        
+        try:
+            emails = []
+            page_token = None
+            
+            while True:
+                results = self.service.users().messages().list(
+                    userId='me',
+                    q=query,
+                    maxResults=min(max_results - len(emails), 500),
+                    pageToken=page_token
+                ).execute()
+                
+                messages = results.get('messages', [])
+                
+                for msg in messages:
+                    email_data = self._get_email_details(msg['id'])
+                    if email_data:
+                        email_data['message_id'] = msg['id']
+                        emails.append(email_data)
+                
+                page_token = results.get('nextPageToken')
+                
+                # Stop if we've fetched enough or no more pages
+                if not page_token or len(emails) >= max_results:
+                    break
+            
+            print(f"[GmailService] Fetched {len(emails)} emails from {start_date} to {end_date}")
+            return emails
+            
+        except Exception as e:
+            print(f"[GmailService] Error fetching emails by date range: {e}")
+            return []
+    
+    def fetch_thread_messages(self, thread_id: str) -> list[dict]:
+        """
+        Fetch all messages in a thread.
+        
+        Args:
+            thread_id: Gmail thread ID
+            
+        Returns:
+            List of email dictionaries sorted by date (oldest first)
+        """
+        try:
+            # Get thread details
+            thread = self.service.users().threads().get(
+                userId='me',
+                id=thread_id,
+                format='full'
+            ).execute()
+            
+            messages = thread.get('messages', [])
+            emails = []
+            
+            for msg in messages:
+                email_details = self._get_email_details(msg['id'])
+                if email_details:
+                    email_details['message_id'] = msg['id']
+                    emails.append(email_details)
+            
+            # Sort by date (oldest first) to get original email first
+            emails.sort(key=lambda x: x.get('date_sent', ''))
+            
+            print(f"[GmailService] Fetched {len(emails)} messages from thread {thread_id}")
+            return emails
+            
+        except Exception as e:
+            print(f"[GmailService] Error fetching thread: {e}")
+            return []
+    
     def _get_email_details(self, message_id: str) -> Optional[dict]:
         """Get full details of a specific email with enhanced metadata."""
         try:
