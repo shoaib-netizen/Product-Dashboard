@@ -26,6 +26,8 @@ class Config:
     
     # Email Filtering
     FILTER_FROM_EMAIL: str = os.getenv("FILTER_FROM_EMAIL", "")
+    FILTER_PRODUCT_ENGINEERING: bool = os.getenv("FILTER_PRODUCT_ENGINEERING", "true").lower() == "true"
+    PRODUCT_ENGINEERING_EMAIL: str = os.getenv("PRODUCT_ENGINEERING_EMAIL", "engineering@onescreensolutions.com")
     
     # Server Configuration
     PORT: int = int(os.getenv("PORT", "10000"))

@@ -76,6 +76,10 @@ class GmailService:
         """
         query = f"is:unread label:{Config.GMAIL_LABEL_FILTER}"
         
+        # Filter for Product Engineering emails only
+        if Config.FILTER_PRODUCT_ENGINEERING:
+            query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
+        
         if Config.FILTER_FROM_EMAIL:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
         
