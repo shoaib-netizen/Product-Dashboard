@@ -24,6 +24,7 @@ class GoogleSheetsService:
     # Expected headers in the sheet - Product Engineering Team Format
     HEADERS = [
         "SN",
+        "Thread ID",
         "Email Subject",
         "Sender Name",
         "Sender Email",
@@ -34,6 +35,7 @@ class GoogleSheetsService:
         "Email Summary",
         "Team Origin",
         "Reply Status",
+        "Reply Count",
         "Replied By",
         "Reply Date",
         "Reply Summary",
@@ -93,10 +95,10 @@ class GoogleSheetsService:
             first_row = self.sheet.row_values(1)
             if not first_row or first_row != self.HEADERS:
                 # Update headers
-                self.sheet.update('A1:P1', [self.HEADERS])
+                self.sheet.update('A1:R1', [self.HEADERS])
                 
                 # Format header row (blue background, white bold text, centered)
-                self.sheet.format('A1:P1', {
+                self.sheet.format('A1:R1', {
                     'backgroundColor': {'red': 0.2, 'green': 0.4, 'blue': 0.8},
                     'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}},
                     'horizontalAlignment': 'CENTER',
@@ -106,10 +108,10 @@ class GoogleSheetsService:
                 # Freeze header row
                 self.sheet.freeze(rows=1)
                 
-                print(f"[SheetsService] Headers formatted with 16 columns")
+                print(f"[SheetsService] Headers formatted with 18 columns")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
-            self.sheet.update('A1:P1', [self.HEADERS])
+            self.sheet.update('A1:R1', [self.HEADERS])
     
     def _get_next_sn(self) -> int:
         """Get the next serial number."""
@@ -136,6 +138,7 @@ class GoogleSheetsService:
             
             row = [
                 str(sn),
+                task.thread_id,
                 task.email_subject,
                 task.sender_name,
                 task.sender_email,
@@ -146,6 +149,7 @@ class GoogleSheetsService:
                 task.email_summary,
                 task.team_origin,
                 task.reply_status,
+                str(task.reply_count),
                 task.replied_by,
                 task.reply_date,
                 task.reply_summary,
@@ -177,11 +181,103 @@ class GoogleSheetsService:
             else:  # No Reply
                 bg_color = {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White
                 
-            self.sheet.format(f'A{row_num}:P{row_num}', {
+            self.sheet.format(f'A{row_num}:R{row_num}', {
                 'backgroundColor': bg_color
             })
         except:
             pass  # Silently fail if formatting doesn't work
+    
+    def find_thread_row(self, thread_id: str) -> Optional[int]:
+        """
+        Find the row number for a given thread ID.
+        
+        Args:
+            thread_id: Gmail thread ID to search for
+            
+        Returns:
+            Row number if found, None otherwise
+        """
+        try:
+            # Get all thread IDs (column B)
+            thread_ids = self.sheet.col_values(2)  # Column B (Thread ID)
+            
+            # Search for matching thread_id (skip header row)
+            for i, tid in enumerate(thread_ids[1:], start=2):
+                if tid == thread_id:
+                    return i
+            
+            return None
+        except Exception as e:
+            print(f"[SheetsService] Error finding thread: {e}")
+            return None
+    
+    def update_thread_reply(self, thread_id: str, reply_data: dict) -> bool:
+        """
+        Update an existing thread with reply information.
+        
+        Args:
+            thread_id: Gmail thread ID
+            reply_data: Dictionary with reply information (replied_by, reply_date, reply_summary, reply_count)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            row_num = self.find_thread_row(thread_id)
+            
+            if not row_num:
+                print(f"[SheetsService] Thread {thread_id} not found")
+                return False
+            
+            # Update columns: L=Reply Status, M=Reply Count, N=Replied By, O=Reply Date, P=Reply Summary
+            updates = []
+            
+            # Column L (12): Reply Status
+            updates.append({
+                'range': f'L{row_num}',
+                'values': [['Replied']]
+            })
+            
+            # Column M (13): Reply Count
+            if 'reply_count' in reply_data:
+                updates.append({
+                    'range': f'M{row_num}',
+                    'values': [[str(reply_data['reply_count'])]]
+                })
+            
+            # Column N (14): Replied By
+            if 'replied_by' in reply_data:
+                updates.append({
+                    'range': f'N{row_num}',
+                    'values': [[reply_data['replied_by']]]
+                })
+            
+            # Column O (15): Reply Date
+            if 'reply_date' in reply_data:
+                updates.append({
+                    'range': f'O{row_num}',
+                    'values': [[reply_data['reply_date']]]
+                })
+            
+            # Column P (16): Reply Summary
+            if 'reply_summary' in reply_data:
+                updates.append({
+                    'range': f'P{row_num}',
+                    'values': [[reply_data['reply_summary']]]
+                })
+            
+            # Batch update
+            self.sheet.batch_update(updates)
+            
+            # Update formatting
+            self._apply_row_formatting(row_num, 'Replied')
+            
+            print(f"[SheetsService] Updated thread {thread_id} at row {row_num}")
+            return True
+            
+        except Exception as e:
+            print(f"[SheetsService] Error updating thread: {e}")
+            return False
     
     def add_tasks_batch(self, tasks: list[TaskData]) -> int:
         """

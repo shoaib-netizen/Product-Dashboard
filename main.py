@@ -76,22 +76,60 @@ class EmailToSheetsAgent:
         processed_count = 0
         for email in emails:
             try:
-                logger.info(f"Processing: {email.get('subject', 'No Subject')[:50]}...")
+                subject = email.get('subject', 'No Subject')
+                thread_id = email.get('thread_id', '')
+                logger.info(f"Processing: {subject[:50]}...")
                 
-                # Parse with AI agent
-                task_data = self.parser.parse_email(email)
+                # Check if this thread already exists in the sheet
+                existing_row = self.sheets.find_thread_row(thread_id) if thread_id else None
                 
-                if task_data:
-                    # Store in Google Sheets
-                    if self.sheets.add_task(task_data):
-                        # Mark email as read
+                # Determine if this is a reply (subject starts with Re: or thread exists)
+                is_reply = subject.startswith('Re:') or existing_row is not None
+                
+                if is_reply and existing_row:
+                    # This is a reply to an existing thread - update the row
+                    logger.info(f"  → Reply detected for existing thread")
+                    
+                    # Parse the reply with AI to get summary
+                    reply_task = self.parser.parse_email(email)
+                    
+                    # Get current reply count and increment
+                    current_count = 0
+                    try:
+                        current_count_val = self.sheets.sheet.cell(existing_row, 13).value  # Column M
+                        current_count = int(current_count_val) if current_count_val else 0
+                    except:
+                        pass
+                    
+                    # Update the thread with reply information
+                    reply_data = {
+                        'reply_count': current_count + 1,
+                        'replied_by': reply_task.sender_name if reply_task else email.get('from', 'Unknown'),
+                        'reply_date': reply_task.date_sent if reply_task else email.get('date_sent', ''),
+                        'reply_summary': reply_task.email_summary if reply_task else ''
+                    }
+                    
+                    if self.sheets.update_thread_reply(thread_id, reply_data):
                         self.gmail.mark_as_read(email['message_id'])
                         processed_count += 1
-                        logger.info(f"  ✓ Added: {task_data.task_name}")
+                        logger.info(f"  ✓ Updated thread with reply from {reply_data['replied_by']}")
                     else:
-                        logger.warning(f"  ✗ Failed to add to sheets")
+                        logger.warning(f"  ✗ Failed to update thread")
                 else:
-                    logger.warning(f"  ✗ Failed to parse email")
+                    # New thread - parse and add as new row
+                    task_data = self.parser.parse_email(email)
+                    
+                    if task_data:
+                        # Store in Google Sheets
+                        if self.sheets.add_task(task_data):
+                            # Mark email as read
+                            self.gmail.mark_as_read(email['message_id'])
+                            processed_count += 1
+                            logger.info(f"  ✓ Added: {task_data.task_name}")
+                        else:
+                            logger.warning(f"  ✗ Failed to add to sheets")
+                    else:
+                        logger.warning(f"  ✗ Failed to parse email")
                     
             except Exception as e:
                 logger.error(f"  ✗ Error processing email: {e}")
