@@ -32,6 +32,7 @@ class Config:
     FILTER_FROM_EMAIL: str = os.getenv("FILTER_FROM_EMAIL", "")
     FILTER_PRODUCT_ENGINEERING: bool = os.getenv("FILTER_PRODUCT_ENGINEERING", "true").lower() == "true"
     PRODUCT_ENGINEERING_EMAIL: str = os.getenv("PRODUCT_ENGINEERING_EMAIL", "engineering@onescreensolutions.com")
+    IGNORED_EMAILS: list = os.getenv("IGNORED_EMAILS", "donotreply@onescreensolutions.com,sage@onescreensolutions.com,noreply@bytello.com").split(",")
     
     # Server Configuration
     PORT: int = int(os.getenv("PORT", "10000"))

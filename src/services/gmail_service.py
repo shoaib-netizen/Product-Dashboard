@@ -86,8 +86,10 @@ class GmailService:
         if Config.FILTER_PRODUCT_ENGINEERING:
             query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
         
-        # Exclude specific senders
-        query += f" -from:donotreply@onescreensolutions.com -from:sage@onescreensolutions.com"
+        # Exclude specific senders from config
+        for ignored_email in Config.IGNORED_EMAILS:
+            if ignored_email.strip():  # Skip empty entries
+                query += f" -from:{ignored_email.strip()}"
         
         if Config.FILTER_FROM_EMAIL:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
@@ -140,8 +142,10 @@ class GmailService:
         if Config.FILTER_PRODUCT_ENGINEERING:
             query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
         
-        # Exclude specific senders
-        query += f" -from:donotreply@onescreensolutions.com -from:sage@onescreensolutions.com"
+        # Exclude specific senders from config
+        for ignored_email in Config.IGNORED_EMAILS:
+            if ignored_email.strip():  # Skip empty entries
+                query += f" -from:{ignored_email.strip()}"
         
         if Config.FILTER_FROM_EMAIL:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
