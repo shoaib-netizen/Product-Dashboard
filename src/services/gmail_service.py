@@ -252,14 +252,45 @@ class GmailService:
             to_field = headers.get('To', '')
             cc_field = headers.get('Cc', '')
             
-            # Combine To and CC recipients
-            all_recipients = []
-            if to_field:
-                all_recipients.append(to_field)
-            if cc_field:
-                all_recipients.append(cc_field)
+            # Parse and extract email addresses from To and CC fields
+            def extract_emails(field_value):
+                """Extract clean email addresses from a header field."""
+                if not field_value:
+                    return []
+                
+                emails = []
+                # Split by comma to handle multiple recipients
+                parts = field_value.split(',')
+                
+                for part in parts:
+                    part = part.strip()
+                    # Extract email from "Name <email@domain.com>" format
+                    if '<' in part and '>' in part:
+                        email = part.split('<')[1].split('>')[0].strip()
+                    else:
+                        # Plain email address
+                        email = part.strip()
+                    
+                    if email and '@' in email:
+                        emails.append(email)
+                
+                return emails
             
-            recipients_str = ', '.join(all_recipients) if all_recipients else 'Unknown'
+            # Combine all unique recipients from To and CC
+            all_recipient_emails = []
+            all_recipient_emails.extend(extract_emails(to_field))
+            all_recipient_emails.extend(extract_emails(cc_field))
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_recipients = []
+            for email in all_recipient_emails:
+                email_lower = email.lower()
+                if email_lower not in seen:
+                    seen.add(email_lower)
+                    unique_recipients.append(email)
+            
+            recipients_str = ', '.join(unique_recipients) if unique_recipients else 'Unknown'
             
             return {
                 'subject': headers.get('Subject', 'No Subject'),

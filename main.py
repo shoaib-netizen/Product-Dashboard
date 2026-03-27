@@ -101,7 +101,14 @@ class EmailToSheetsAgent:
                     except:
                         pass
                     
-                    # Get current replied_by list and append new responder
+                    # Get original sender to exclude from responders list
+                    original_sender = ""
+                    try:
+                        original_sender = self.sheets.sheet.cell(existing_row, 5).value or ""  # Column E (Sender Email)
+                    except:
+                        pass
+                    
+                    # Get current replied_by list and build unique responders list
                     current_replied_by = ""
                     try:
                         current_replied_by = self.sheets.sheet.cell(existing_row, 13).value or ""  # Column M
@@ -111,15 +118,35 @@ class EmailToSheetsAgent:
                     # Format new responder with email
                     new_responder = email.get('from', 'Unknown')
                     
-                    # Append to list if not already there
+                    # Extract email address for comparison (handles "Name <email@domain.com>" format)
+                    def extract_email(responder_str):
+                        if '<' in responder_str and '>' in responder_str:
+                            return responder_str.split('<')[1].split('>')[0].strip().lower()
+                        return responder_str.strip().lower()
+                    
+                    new_email = extract_email(new_responder)
+                    original_email = extract_email(original_sender)
+                    
+                    # Build unique responders list (exclude original sender)
+                    responders_set = set()
+                    responders_list = []
+                    
+                    # Add existing responders
                     if current_replied_by:
-                        # Check if this person already replied
-                        if new_responder not in current_replied_by:
-                            replied_by_list = current_replied_by + "; " + new_responder
-                        else:
-                            replied_by_list = current_replied_by
-                    else:
-                        replied_by_list = new_responder
+                        for resp in current_replied_by.split(';'):
+                            resp = resp.strip()
+                            if resp:
+                                resp_email = extract_email(resp)
+                                if resp_email != original_email and resp_email not in responders_set:
+                                    responders_set.add(resp_email)
+                                    responders_list.append(resp)
+                    
+                    # Add new responder if not original sender and not duplicate
+                    if new_email != original_email and new_email not in responders_set:
+                        responders_set.add(new_email)
+                        responders_list.append(new_responder)
+                    
+                    replied_by_list = "; ".join(responders_list) if responders_list else new_responder
                     
                     # Update the thread with reply information
                     reply_data = {
@@ -132,7 +159,8 @@ class EmailToSheetsAgent:
                     if self.sheets.update_thread_reply(thread_id, reply_data):
                         self.gmail.mark_as_read(email['message_id'])
                         processed_count += 1
-                        logger.info(f"  ✓ Updated thread with reply from {reply_data['replied_by']}")
+                        logger.info(f"  ✓ Updated thread with reply from {new_responder}")
+                        logger.info(f"  → All responders: {replied_by_list}")
                     else:
                         logger.warning(f"  ✗ Failed to update thread")
                         

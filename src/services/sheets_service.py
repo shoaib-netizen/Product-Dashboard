@@ -47,6 +47,7 @@ class GoogleSheetsService:
         self.client = gspread.authorize(self.creds)
         self.sheet = self._get_sheet()
         self._ensure_headers()
+        self._format_as_table()
     
     def _authenticate(self) -> Credentials:
         """Authenticate with Google Sheets using service account."""
@@ -94,22 +95,159 @@ class GoogleSheetsService:
             if not first_row or first_row != self.HEADERS:
                 # Update headers
                 self.sheet.update('A1:P1', [self.HEADERS])
-                
-                # Format header row (blue background, white bold text, centered)
-                self.sheet.format('A1:P1', {
-                    'backgroundColor': {'red': 0.2, 'green': 0.4, 'blue': 0.8},
-                    'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}},
-                    'horizontalAlignment': 'CENTER',
-                    'verticalAlignment': 'MIDDLE'
-                })
-                
-                # Freeze header row
-                self.sheet.freeze(rows=1)
-                
-                print(f"[SheetsService] Headers formatted with 16 columns")
+            
+            # Always apply header formatting
+            self.sheet.format('A1:P1', {
+                'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},  # Professional blue
+                'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
+                'horizontalAlignment': 'CENTER',
+                'verticalAlignment': 'MIDDLE'
+            })
+            
+            # Freeze header row
+            self.sheet.freeze(rows=1)
+            
+            print(f"[SheetsService] Headers formatted with 16 columns")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
             self.sheet.update('A1:P1', [self.HEADERS])
+    
+    def _format_as_table(self):
+        """Format the entire sheet as a professional table."""
+        try:
+            # Set column widths for better readability
+            column_widths = [
+                ("A", 60),   # SN
+                ("B", 150),  # Thread ID
+                ("C", 250),  # Email Subject
+                ("D", 150),  # Sender Name
+                ("E", 200),  # Sender Email
+                ("F", 250),  # Recipient Email
+                ("G", 130),  # Date Sent
+                ("H", 200),  # Task Name
+                ("I", 300),  # Email Summary
+                ("J", 120),  # Team Origin
+                ("K", 100),  # Reply Status
+                ("L", 100),  # Reply Count
+                ("M", 250),  # Replied By
+                ("N", 130),  # Reply Date
+                ("O", 300),  # Reply Summary
+                ("P", 100),  # Task Status
+            ]
+            
+            requests = []
+            for col_letter, width in column_widths:
+                col_index = ord(col_letter) - ord('A')
+                requests.append({
+                    "updateDimensionProperties": {
+                        "range": {
+                            "sheetId": self.sheet.id,
+                            "dimension": "COLUMNS",
+                            "startIndex": col_index,
+                            "endIndex": col_index + 1
+                        },
+                        "properties": {
+                            "pixelSize": width
+                        },
+                        "fields": "pixelSize"
+                    }
+                })
+            
+            # Add borders to all cells (table look)
+            requests.append({
+                "updateBorders": {
+                    "range": {
+                        "sheetId": self.sheet.id,
+                        "startRowIndex": 0,
+                        "endRowIndex": 1000,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": 16
+                    },
+                    "top": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "bottom": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "left": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "right": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "innerHorizontal": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
+                    "innerVertical": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}}
+                }
+            })
+            
+            # Add alternating row colors (banding) - light gray and white
+            requests.append({
+                "addBanding": {
+                    "bandedRange": {
+                        "range": {
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,  # Skip header
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 0,
+                            "endColumnIndex": 16
+                        },
+                        "rowProperties": {
+                            "firstBandColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
+                            "secondBandColor": {"red": 0.95, "green": 0.95, "blue": 0.95}
+                        }
+                    }
+                }
+            })
+            
+            # Add data validation for Reply Status column (K)
+            requests.append({
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": self.sheet.id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 1000,
+                        "startColumnIndex": 10,  # Column K (Reply Status)
+                        "endColumnIndex": 11
+                    },
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [
+                                {"userEnteredValue": "No Reply"},
+                                {"userEnteredValue": "Replied"}
+                            ]
+                        },
+                        "showCustomUi": True,
+                        "strict": False
+                    }
+                }
+            })
+            
+            # Add data validation for Task Status column (P)
+            requests.append({
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": self.sheet.id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 1000,
+                        "startColumnIndex": 15,  # Column P (Task Status)
+                        "endColumnIndex": 16
+                    },
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [
+                                {"userEnteredValue": "Pending"},
+                                {"userEnteredValue": "In Progress"},
+                                {"userEnteredValue": "Completed"},
+                                {"userEnteredValue": "On Hold"},
+                                {"userEnteredValue": "Cancelled"}
+                            ]
+                        },
+                        "showCustomUi": True,
+                        "strict": False
+                    }
+                }
+            })
+            
+            # Execute all formatting requests
+            self.sheet.spreadsheet.batch_update({"requests": requests})
+            print(f"[SheetsService] Table formatting applied successfully")
+            
+        except Exception as e:
+            print(f"[SheetsService] Error formatting table: {e}")
     
     def _get_next_sn(self) -> int:
         """Get the next serial number."""
@@ -274,6 +412,39 @@ class GoogleSheetsService:
         except Exception as e:
             print(f"[SheetsService] Error updating thread: {e}")
             return False
+    
+    def get_all_data(self) -> list[dict]:
+        """
+        Fetch all data from the sheet as a list of dictionaries.
+        
+        Returns:
+            List of dictionaries with column headers as keys
+        """
+        try:
+            # Get all values from the sheet
+            all_values = self.sheet.get_all_values()
+            
+            if not all_values or len(all_values) < 2:
+                return []
+            
+            # First row is headers
+            headers = all_values[0]
+            
+            # Convert rows to dictionaries
+            data = []
+            for row in all_values[1:]:  # Skip header row
+                # Pad row if it has fewer columns than headers
+                while len(row) < len(headers):
+                    row.append('')
+                
+                row_dict = {headers[i]: row[i] for i in range(len(headers))}
+                data.append(row_dict)
+            
+            return data
+            
+        except Exception as e:
+            print(f"[SheetsService] Error fetching all data: {e}")
+            return []
     
     def add_tasks_batch(self, tasks: list[TaskData]) -> int:
         """
