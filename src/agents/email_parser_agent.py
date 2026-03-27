@@ -20,7 +20,6 @@ class TaskData(BaseModel):
     email_subject: str = Field(description="Email subject line")
     sender_name: str = Field(description="Sender's name")
     sender_email: str = Field(description="Sender's email address")
-    recipient_email: str = Field(description="Recipient's email address")
     date_sent: str = Field(description="Date email was sent (YYYY-MM-DD)")
     date_received: str = Field(description="Date email was received (YYYY-MM-DD)")
     
@@ -57,8 +56,7 @@ Extract these fields:
 2. email_subject: The email subject line
 3. sender_name: Sender's full name (extract from email if available)
 4. sender_email: Sender's email address
-5. recipient_email: Recipient's email address  
-6. date_sent: Date sent (YYYY-MM-DD format)
+5. date_sent: Date sent (YYYY-MM-DD format)
 7. date_received: Date/time received (YYYY-MM-DD HH:MM format)
 8. task_name: Brief, clear title for the task/request (max 50 chars)
 9. email_summary: 2-3 sentence summary of the email body
@@ -82,7 +80,6 @@ Respond ONLY with valid JSON matching this structure:
     "email_subject": "string",
     "sender_name": "string",
     "sender_email": "email@domain.com",
-    "recipient_email": "email@domain.com",
     "date_sent": "YYYY-MM-DD",
     "date_received": "YYYY-MM-DD HH:MM",
     "task_name": "string",
@@ -204,7 +201,6 @@ Extract all the email information as JSON. This is an incoming email, so reply_s
             email_subject=email_data.get('subject', 'No Subject'),
             sender_name=sender_email.split('<')[0].strip() if '<' in sender_email else sender_email,
             sender_email=sender_email,
-            recipient_email=email_data.get('to', 'Unknown'),
             date_sent=date_str,
             date_received=date_str,
             task_name=email_data.get('subject', 'Email Task')[:50],

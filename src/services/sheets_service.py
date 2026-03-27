@@ -28,7 +28,6 @@ class GoogleSheetsService:
         "Email Subject",
         "Sender Name",
         "Sender Email",
-        "Recipient Email",
         "Date Sent",
         "Task Name",
         "Email Summary",
@@ -92,10 +91,10 @@ class GoogleSheetsService:
             first_row = self.sheet.row_values(1)
             if not first_row or first_row != self.HEADERS:
                 # Update headers
-                self.sheet.update('A1:O1', [self.HEADERS])
+                self.sheet.update([self.HEADERS], 'A1:N1')
             
             # Always apply header formatting
-            self.sheet.format('A1:O1', {
+            self.sheet.format('A1:N1', {
                 'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},  # Professional blue
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
                 'horizontalAlignment': 'CENTER',
@@ -116,7 +115,7 @@ class GoogleSheetsService:
                                     "startRowIndex": 0,
                                     "endRowIndex": 1000,  # Cover up to 1000 rows
                                     "startColumnIndex": 0,
-                                    "endColumnIndex": 15   # All 15 columns (A-O)
+                                    "endColumnIndex": 14   # All 14 columns (A-N)
                                 }
                             }
                         }
@@ -127,7 +126,7 @@ class GoogleSheetsService:
                 print(f"[SheetsService] Headers formatted (filter may already exist)")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
-            self.sheet.update('A1:O1', [self.HEADERS])
+            self.sheet.update([self.HEADERS], 'A1:N1')
     
     def _format_as_table(self):
         """Format the entire sheet as a professional table."""
@@ -139,17 +138,15 @@ class GoogleSheetsService:
                 ("C", 250),  # Email Subject
                 ("D", 150),  # Sender Name
                 ("E", 200),  # Sender Email
-                ("F", 250),  # Recipient Email
-                ("G", 130),  # Date Sent
-                ("H", 200),  # Task Name
-                ("I", 300),  # Email Summary
-                ("J", 120),  # Team Origin
-                ("K", 100),  # Reply Status
-                ("L", 100),  # Reply Count
-                ("M", 250),  # Replied By
-                ("N", 130),  # Reply Date
-                ("O", 300),  # Reply Summary
-                ("P", 100),  # Task Status
+                ("F", 130),  # Date Sent
+                ("G", 200),  # Task Name
+                ("H", 300),  # Email Summary
+                ("I", 120),  # Team Origin
+                ("J", 100),  # Reply Status
+                ("K", 250),  # Replied By
+                ("L", 130),  # Reply Date
+                ("M", 300),  # Reply Summary
+                ("N", 100),  # Task Status
             ]
             
             requests = []
@@ -178,7 +175,7 @@ class GoogleSheetsService:
                         "startRowIndex": 0,
                         "endRowIndex": 1000,
                         "startColumnIndex": 0,
-                        "endColumnIndex": 16
+                        "endColumnIndex": 14
                     },
                     "top": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
                     "bottom": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
@@ -213,7 +210,7 @@ class GoogleSheetsService:
                             "startRowIndex": 1,  # Skip header
                             "endRowIndex": 1000,
                             "startColumnIndex": 0,
-                            "endColumnIndex": 16
+                            "endColumnIndex": 14
                         },
                         "rowProperties": {
                             "firstBandColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
@@ -223,15 +220,15 @@ class GoogleSheetsService:
                 }
             })
             
-            # Add data validation for Reply Status column (K)
+            # Add data validation for Reply Status column (J)
             requests.append({
                 "setDataValidation": {
                     "range": {
                         "sheetId": self.sheet.id,
                         "startRowIndex": 1,
                         "endRowIndex": 1000,
-                        "startColumnIndex": 10,  # Column K (Reply Status)
-                        "endColumnIndex": 11
+                        "startColumnIndex": 9,  # Column J (Reply Status)
+                        "endColumnIndex": 10
                     },
                     "rule": {
                         "condition": {
@@ -247,15 +244,15 @@ class GoogleSheetsService:
                 }
             })
             
-            # Add data validation for Task Status column (P)
+            # Add data validation for Task Status column (N)
             requests.append({
                 "setDataValidation": {
                     "range": {
                         "sheetId": self.sheet.id,
                         "startRowIndex": 1,
                         "endRowIndex": 1000,
-                        "startColumnIndex": 15,  # Column P (Task Status)
-                        "endColumnIndex": 16
+                        "startColumnIndex": 13,  # Column N (Task Status)
+                        "endColumnIndex": 14
                     },
                     "rule": {
                         "condition": {
@@ -281,6 +278,17 @@ class GoogleSheetsService:
         except Exception as e:
             print(f"[SheetsService] Error formatting table: {e}")
     
+    def clear_sheet(self):
+        """Clear all data rows from the sheet, keeping the header row."""
+        try:
+            all_values = self.sheet.get_all_values()
+            if len(all_values) > 1:
+                # Delete all rows after header
+                self.sheet.delete_rows(2, len(all_values))
+            print(f"[SheetsService] Sheet cleared (header preserved)")
+        except Exception as e:
+            print(f"[SheetsService] Error clearing sheet: {e}")
+
     def _get_next_sn(self) -> int:
         """Get the next serial number."""
         try:
@@ -310,7 +318,6 @@ class GoogleSheetsService:
                 task.email_subject,
                 task.sender_name,
                 task.sender_email,
-                task.recipient_email,
                 task.date_sent,
                 task.task_name,
                 task.email_summary,
@@ -373,33 +380,33 @@ class GoogleSheetsService:
                 print(f"[SheetsService] Thread {thread_id} not found")
                 return False
             
-            # Update columns: K=Reply Status, L=Replied By, M=Reply Date, N=Reply Summary
+            # Update columns: J=Reply Status, K=Replied By, L=Reply Date, M=Reply Summary
             updates = []
             
-            # Column K (11): Reply Status
+            # Column J (10): Reply Status
             updates.append({
-                'range': f'K{row_num}',
+                'range': f'J{row_num}',
                 'values': [['Replied']]
             })
             
-            # Column L (12): Replied By
+            # Column K (11): Replied By
             if 'replied_by' in reply_data:
                 updates.append({
-                    'range': f'L{row_num}',
+                    'range': f'K{row_num}',
                     'values': [[reply_data['replied_by']]]
                 })
             
-            # Column M (13): Reply Date
+            # Column L (12): Reply Date
             if 'reply_date' in reply_data:
                 updates.append({
-                    'range': f'M{row_num}',
+                    'range': f'L{row_num}',
                     'values': [[reply_data['reply_date']]]
                 })
             
-            # Column N (14): Reply Summary
+            # Column M (13): Reply Summary
             if 'reply_summary' in reply_data:
                 updates.append({
-                    'range': f'N{row_num}',
+                    'range': f'M{row_num}',
                     'values': [[reply_data['reply_summary']]]
                 })
             

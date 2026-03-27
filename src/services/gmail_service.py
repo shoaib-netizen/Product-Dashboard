@@ -248,38 +248,38 @@ class GmailService:
                 date_sent = now.strftime('%Y-%m-%d')
                 date_received = now.strftime('%Y-%m-%d')
             
-            # Extract all recipients (To + CC fields)
+            # Extract all recipients (To + CC + BCC fields)
             to_field = headers.get('To', '')
             cc_field = headers.get('Cc', '')
+            bcc_field = headers.get('Bcc', '')
             
-            # Parse and extract email addresses from To and CC fields
+            # Parse and extract email addresses from To, CC, and BCC fields
             def extract_emails(field_value):
                 """Extract clean email addresses from a header field."""
                 if not field_value:
                     return []
                 
                 emails = []
-                # Split by comma to handle multiple recipients
-                parts = field_value.split(',')
+                # Use regex to properly extract emails from complex formats
+                import re
                 
-                for part in parts:
-                    part = part.strip()
-                    # Extract email from "Name <email@domain.com>" format
-                    if '<' in part and '>' in part:
-                        email = part.split('<')[1].split('>')[0].strip()
-                    else:
-                        # Plain email address
-                        email = part.strip()
-                    
+                # Pattern to match email addresses in angle brackets or standalone
+                email_pattern = r'<([^>]+)>|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'
+                
+                matches = re.findall(email_pattern, field_value)
+                for match in matches:
+                    # match is a tuple: (email_in_brackets, standalone_email)
+                    email = match[0] if match[0] else match[1]
                     if email and '@' in email:
-                        emails.append(email)
+                        emails.append(email.strip())
                 
                 return emails
             
-            # Combine all unique recipients from To and CC
+            # Combine all unique recipients from To, CC, and BCC
             all_recipient_emails = []
             all_recipient_emails.extend(extract_emails(to_field))
             all_recipient_emails.extend(extract_emails(cc_field))
+            all_recipient_emails.extend(extract_emails(bcc_field))
             
             # Remove duplicates while preserving order
             seen = set()
