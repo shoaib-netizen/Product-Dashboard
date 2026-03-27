@@ -93,14 +93,6 @@ class EmailToSheetsAgent:
                     # Parse the reply with AI to get summary
                     reply_task = self.parser.parse_email(email)
                     
-                    # Get current reply count and increment
-                    current_count = 0
-                    try:
-                        current_count_val = self.sheets.sheet.cell(existing_row, 12).value  # Column L
-                        current_count = int(current_count_val) if current_count_val else 0
-                    except:
-                        pass
-                    
                     # Get original sender to exclude from responders list
                     original_sender = ""
                     try:
@@ -111,7 +103,7 @@ class EmailToSheetsAgent:
                     # Get current replied_by list and build unique responders list
                     current_replied_by = ""
                     try:
-                        current_replied_by = self.sheets.sheet.cell(existing_row, 13).value or ""  # Column M
+                        current_replied_by = self.sheets.sheet.cell(existing_row, 12).value or ""  # Column L (Replied By)
                     except:
                         pass
                     
@@ -150,7 +142,6 @@ class EmailToSheetsAgent:
                     
                     # Update the thread with reply information
                     reply_data = {
-                        'reply_count': current_count + 1,
                         'replied_by': replied_by_list,
                         'reply_date': reply_task.date_sent if reply_task else email.get('date_sent', ''),
                         'reply_summary': reply_task.email_summary if reply_task else ''
@@ -203,7 +194,6 @@ class EmailToSheetsAgent:
                                     replied_by_list = "; ".join(responders) if responders else latest_reply.get('from', 'Unknown')
                                     
                                     reply_data = {
-                                        'reply_count': len(thread_messages) - 1,  # Total replies
                                         'replied_by': replied_by_list,
                                         'reply_date': reply_task.date_sent if reply_task else latest_reply.get('date_sent', ''),
                                         'reply_summary': reply_task.email_summary if reply_task else ''
@@ -329,7 +319,6 @@ class EmailToSheetsAgent:
                                 replied_by_list = "; ".join(responders) if responders else latest_reply.get('from', 'Unknown')
                                 
                                 reply_data = {
-                                    'reply_count': len(thread_messages) - 1,
                                     'replied_by': replied_by_list,
                                     'reply_date': reply_task.date_sent if reply_task else latest_reply.get('date_sent', ''),
                                     'reply_summary': reply_task.email_summary if reply_task else ''

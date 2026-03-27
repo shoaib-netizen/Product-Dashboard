@@ -21,8 +21,8 @@ class TaskData(BaseModel):
     sender_name: str = Field(description="Sender's name")
     sender_email: str = Field(description="Sender's email address")
     recipient_email: str = Field(description="Recipient's email address")
-    date_sent: str = Field(description="Date/time email was sent (YYYY-MM-DD HH:MM)")
-    date_received: str = Field(description="Date/time email was received (YYYY-MM-DD HH:MM)")
+    date_sent: str = Field(description="Date email was sent (YYYY-MM-DD)")
+    date_received: str = Field(description="Date email was received (YYYY-MM-DD)")
     
     # Task Information
     task_name: str = Field(description="Brief name/title of the task")
@@ -31,9 +31,8 @@ class TaskData(BaseModel):
     
     # Reply Tracking
     reply_status: str = Field(default="No Reply", description="Replied, Pending, No Reply")
-    reply_count: int = Field(default=0, description="Number of replies in this thread")
     replied_by: str = Field(default="", description="Who replied to the email")
-    reply_date: str = Field(default="", description="Date/time of reply (YYYY-MM-DD HH:MM)")
+    reply_date: str = Field(default="", description="Date of reply (YYYY-MM-DD)")
     reply_summary: str = Field(default="", description="Summary of the reply")
     
     # Legacy fields for compatibility
@@ -59,7 +58,7 @@ Extract these fields:
 3. sender_name: Sender's full name (extract from email if available)
 4. sender_email: Sender's email address
 5. recipient_email: Recipient's email address  
-6. date_sent: Date/time sent (YYYY-MM-DD HH:MM format)
+6. date_sent: Date sent (YYYY-MM-DD format)
 7. date_received: Date/time received (YYYY-MM-DD HH:MM format)
 8. task_name: Brief, clear title for the task/request (max 50 chars)
 9. email_summary: 2-3 sentence summary of the email body
@@ -84,7 +83,7 @@ Respond ONLY with valid JSON matching this structure:
     "sender_name": "string",
     "sender_email": "email@domain.com",
     "recipient_email": "email@domain.com",
-    "date_sent": "YYYY-MM-DD HH:MM",
+    "date_sent": "YYYY-MM-DD",
     "date_received": "YYYY-MM-DD HH:MM",
     "task_name": "string",
     "email_summary": "string",
@@ -186,8 +185,8 @@ THREAD ID: {email_data.get('thread_id', 'unknown')}
 SUBJECT: {email_data.get('subject', 'No Subject')}
 FROM: {email_data.get('from', 'Unknown')}
 TO: {email_data.get('to', 'Unknown')}
-DATE SENT: {email_data.get('date_sent', datetime.now().strftime('%Y-%m-%d %H:%M'))}
-DATE RECEIVED: {email_data.get('date_received', datetime.now().strftime('%Y-%m-%d %H:%M'))}
+DATE SENT: {email_data.get('date_sent', datetime.now().strftime('%Y-%m-%d'))}
+DATE RECEIVED: {email_data.get('date_received', datetime.now().strftime('%Y-%m-%d'))}
 
 BODY:
 {email_data.get('body', 'No content')}
@@ -198,7 +197,7 @@ Extract all the email information as JSON. This is an incoming email, so reply_s
     def _fallback_parse(self, email_data: dict) -> TaskData:
         """Fallback parsing when LLM fails - uses basic extraction."""
         sender_email = email_data.get('from', 'unknown@unknown.com')
-        date_str = email_data.get('date', datetime.now().strftime('%Y-%m-%d'))
+        date_str = email_data.get('date_sent', email_data.get('date', datetime.now().strftime('%Y-%m-%d')))
         
         return TaskData(
             thread_id=email_data.get('thread_id', 'unknown'),
@@ -206,13 +205,12 @@ Extract all the email information as JSON. This is an incoming email, so reply_s
             sender_name=sender_email.split('<')[0].strip() if '<' in sender_email else sender_email,
             sender_email=sender_email,
             recipient_email=email_data.get('to', 'Unknown'),
-            date_sent=date_str + " 00:00" if len(date_str) == 10 else date_str,
-            date_received=date_str + " 00:00" if len(date_str) == 10 else date_str,
+            date_sent=date_str,
+            date_received=date_str,
             task_name=email_data.get('subject', 'Email Task')[:50],
             email_summary=email_data.get('body', '')[:200],
             team_origin="Unknown",
             reply_status="No Reply",
-            reply_count=0,
             replied_by="",
             reply_date="",
             reply_summary="",

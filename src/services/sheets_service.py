@@ -34,7 +34,6 @@ class GoogleSheetsService:
         "Email Summary",
         "Team Origin",
         "Reply Status",
-        "Reply Count",
         "Replied By",
         "Reply Date",
         "Reply Summary",
@@ -93,10 +92,10 @@ class GoogleSheetsService:
             first_row = self.sheet.row_values(1)
             if not first_row or first_row != self.HEADERS:
                 # Update headers
-                self.sheet.update('A1:P1', [self.HEADERS])
+                self.sheet.update('A1:O1', [self.HEADERS])
             
             # Always apply header formatting
-            self.sheet.format('A1:P1', {
+            self.sheet.format('A1:O1', {
                 'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},  # Professional blue
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
                 'horizontalAlignment': 'CENTER',
@@ -117,7 +116,7 @@ class GoogleSheetsService:
                                     "startRowIndex": 0,
                                     "endRowIndex": 1000,  # Cover up to 1000 rows
                                     "startColumnIndex": 0,
-                                    "endColumnIndex": 16   # All 16 columns (A-P)
+                                    "endColumnIndex": 15   # All 15 columns (A-O)
                                 }
                             }
                         }
@@ -128,7 +127,7 @@ class GoogleSheetsService:
                 print(f"[SheetsService] Headers formatted (filter may already exist)")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
-            self.sheet.update('A1:P1', [self.HEADERS])
+            self.sheet.update('A1:O1', [self.HEADERS])
     
     def _format_as_table(self):
         """Format the entire sheet as a professional table."""
@@ -317,7 +316,6 @@ class GoogleSheetsService:
                 task.email_summary,
                 task.team_origin,
                 task.reply_status,
-                str(task.reply_count),
                 task.replied_by,
                 task.reply_date,
                 task.reply_summary,
@@ -375,7 +373,7 @@ class GoogleSheetsService:
                 print(f"[SheetsService] Thread {thread_id} not found")
                 return False
             
-            # Update columns: K=Reply Status, L=Reply Count, M=Replied By, N=Reply Date, O=Reply Summary
+            # Update columns: K=Reply Status, L=Replied By, M=Reply Date, N=Reply Summary
             updates = []
             
             # Column K (11): Reply Status
@@ -384,31 +382,24 @@ class GoogleSheetsService:
                 'values': [['Replied']]
             })
             
-            # Column L (12): Reply Count
-            if 'reply_count' in reply_data:
-                updates.append({
-                    'range': f'L{row_num}',
-                    'values': [[str(reply_data['reply_count'])]]
-                })
-            
-            # Column M (13): Replied By
+            # Column L (12): Replied By
             if 'replied_by' in reply_data:
                 updates.append({
-                    'range': f'M{row_num}',
+                    'range': f'L{row_num}',
                     'values': [[reply_data['replied_by']]]
                 })
             
-            # Column N (14): Reply Date
+            # Column M (13): Reply Date
             if 'reply_date' in reply_data:
                 updates.append({
-                    'range': f'N{row_num}',
+                    'range': f'M{row_num}',
                     'values': [[reply_data['reply_date']]]
                 })
             
-            # Column O (15): Reply Summary
+            # Column N (14): Reply Summary
             if 'reply_summary' in reply_data:
                 updates.append({
-                    'range': f'O{row_num}',
+                    'range': f'N{row_num}',
                     'values': [[reply_data['reply_summary']]]
                 })
             

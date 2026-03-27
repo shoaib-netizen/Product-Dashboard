@@ -237,16 +237,16 @@ class GmailService:
             # Extract body
             body = self._extract_body(msg['payload'])
             
-            # Parse date with time
+            # Parse date (date only, no time)
             date_str = headers.get('Date', '')
             try:
                 dt = parsedate_to_datetime(date_str)
-                date_sent = dt.strftime('%Y-%m-%d %H:%M')
-                date_received = dt.strftime('%Y-%m-%d %H:%M')  # Approximate
+                date_sent = dt.strftime('%Y-%m-%d')
+                date_received = dt.strftime('%Y-%m-%d')  # Approximate
             except:
                 now = datetime.now()
-                date_sent = now.strftime('%Y-%m-%d %H:%M')
-                date_received = now.strftime('%Y-%m-%d %H:%M')
+                date_sent = now.strftime('%Y-%m-%d')
+                date_received = now.strftime('%Y-%m-%d')
             
             # Extract all recipients (To + CC fields)
             to_field = headers.get('To', '')
