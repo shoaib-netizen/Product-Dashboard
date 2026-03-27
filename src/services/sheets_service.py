@@ -271,6 +271,72 @@ class GoogleSheetsService:
                 }
             })
             
+            # Clear existing conditional format rules to avoid duplicates
+            try:
+                sheet_metadata = self.sheet.spreadsheet.fetch_sheet_metadata()
+                for sheet in sheet_metadata.get('sheets', []):
+                    if sheet['properties']['sheetId'] == self.sheet.id:
+                        cond_formats = sheet.get('conditionalFormats', [])
+                        for i in range(len(cond_formats) - 1, -1, -1):
+                            requests.append({
+                                "deleteConditionalFormatRule": {
+                                    "sheetId": self.sheet.id,
+                                    "index": i
+                                }
+                            })
+            except Exception:
+                pass  # No existing rules to clear
+
+            # Conditional formatting: Reply Status (Column J) - Red for "No Reply", Green for "Replied"
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 9,  # Column J
+                            "endColumnIndex": 10
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "No Reply"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.96, "green": 0.80, "blue": 0.80},
+                                "textFormat": {"foregroundColor": {"red": 0.80, "green": 0.11, "blue": 0.11}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 0
+                }
+            })
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 9,  # Column J
+                            "endColumnIndex": 10
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "Replied"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.80, "green": 0.94, "blue": 0.80},
+                                "textFormat": {"foregroundColor": {"red": 0.13, "green": 0.55, "blue": 0.13}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 1
+                }
+            })
+            
             # Execute all formatting requests
             self.sheet.spreadsheet.batch_update({"requests": requests})
             print(f"[SheetsService] Table formatting applied successfully")
@@ -285,6 +351,8 @@ class GoogleSheetsService:
             if len(all_values) > 1:
                 # Delete all rows after header
                 self.sheet.delete_rows(2, len(all_values))
+            # Re-apply table formatting (dropdowns, conditional formatting, etc.)
+            self._format_as_table()
             print(f"[SheetsService] Sheet cleared (header preserved)")
         except Exception as e:
             print(f"[SheetsService] Error clearing sheet: {e}")
