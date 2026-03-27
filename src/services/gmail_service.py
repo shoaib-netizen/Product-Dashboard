@@ -74,11 +74,19 @@ class GmailService:
         Returns:
             List of email dictionaries with subject, from, date, body
         """
-        query = f"is:unread label:{Config.GMAIL_LABEL_FILTER}"
+        from datetime import datetime, timedelta
+        
+        # Get yesterday's date for filtering (after yesterday = today and onwards)
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y/%m/%d')
+        
+        query = f"is:unread label:{Config.GMAIL_LABEL_FILTER} after:{yesterday}"
         
         # Filter for Product Engineering emails only
         if Config.FILTER_PRODUCT_ENGINEERING:
             query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
+        
+        # Exclude specific senders
+        query += f" -from:donotreply@onescreensolutions.com -from:sage@onescreensolutions.com"
         
         if Config.FILTER_FROM_EMAIL:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
@@ -98,6 +106,9 @@ class GmailService:
                 if email_data:
                     email_data['message_id'] = msg['id']
                     emails.append(email_data)
+            
+            # Sort by date sent (newest first - descending order)
+            emails.sort(key=lambda x: x.get('date_sent', ''), reverse=True)
             
             return emails
             
@@ -128,6 +139,9 @@ class GmailService:
         if Config.FILTER_PRODUCT_ENGINEERING:
             query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
         
+        # Exclude specific senders
+        query += f" -from:donotreply@onescreensolutions.com -from:sage@onescreensolutions.com"
+        
         if Config.FILTER_FROM_EMAIL:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
         
@@ -156,6 +170,9 @@ class GmailService:
                 # Stop if we've fetched enough or no more pages
                 if not page_token or len(emails) >= max_results:
                     break
+            
+            # Sort by date sent (newest first - descending order)
+            emails.sort(key=lambda x: x.get('date_sent', ''), reverse=True)
             
             print(f"[GmailService] Fetched {len(emails)} emails from {start_date} to {end_date}")
             return emails
