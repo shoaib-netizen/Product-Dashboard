@@ -106,7 +106,26 @@ class GoogleSheetsService:
             # Freeze header row
             self.sheet.freeze(rows=1)
             
-            print(f"[SheetsService] Headers formatted with 16 columns")
+            # Add filter to header row for easy filtering by date, status, etc.
+            try:
+                self.sheet.spreadsheet.batch_update({
+                    "requests": [{
+                        "setBasicFilter": {
+                            "filter": {
+                                "range": {
+                                    "sheetId": self.sheet.id,
+                                    "startRowIndex": 0,
+                                    "endRowIndex": 1000,  # Cover up to 1000 rows
+                                    "startColumnIndex": 0,
+                                    "endColumnIndex": 16   # All 16 columns (A-P)
+                                }
+                            }
+                        }
+                    }]
+                })
+                print(f"[SheetsService] Headers formatted with filter enabled")
+            except Exception as filter_error:
+                print(f"[SheetsService] Headers formatted (filter may already exist)")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
             self.sheet.update('A1:P1', [self.HEADERS])

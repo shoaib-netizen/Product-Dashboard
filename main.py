@@ -247,7 +247,7 @@ class EmailToSheetsAgent:
         """Run single processing cycle."""
         logger.info("=" * 50)
         logger.info("Running single processing cycle")
-        count = self.process_emails()
+        count = self.process_emails(max_emails=20)
         logger.info(f"Completed. Processed {count} emails.")
         return count
     
