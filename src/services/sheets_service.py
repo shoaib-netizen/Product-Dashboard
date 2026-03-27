@@ -47,7 +47,6 @@ class GoogleSheetsService:
         self.client = gspread.authorize(self.creds)
         self.sheet = self._get_sheet()
         self._ensure_headers()
-        self._format_as_table()
     
     def _authenticate(self) -> Credentials:
         """Authenticate with Google Sheets using service account."""
@@ -172,6 +171,21 @@ class GoogleSheetsService:
                 }
             })
             
+            # Clear any existing banding first to avoid conflicts
+            try:
+                sheet_metadata = self.sheet.spreadsheet.fetch_sheet_metadata()
+                for sheet in sheet_metadata.get('sheets', []):
+                    if sheet['properties']['sheetId'] == self.sheet.id:
+                        banded_ranges = sheet.get('bandedRanges', [])
+                        for banded_range in banded_ranges:
+                            requests.append({
+                                "deleteBanding": {
+                                    "bandedRangeId": banded_range['bandedRangeId']
+                                }
+                            })
+            except Exception as e:
+                pass  # Silently skip if no banding exists
+            
             # Add alternating row colors (banding) - light gray and white
             requests.append({
                 "addBanding": {
@@ -293,33 +307,12 @@ class GoogleSheetsService:
             
             self.sheet.append_row(row, value_input_option='USER_ENTERED')
             
-            # Apply conditional formatting based on reply status
-            row_num = sn + 1  # +1 for header row
-            self._apply_row_formatting(row_num, task.reply_status)
-            
             print(f"[SheetsService] Added task SN#{sn}: {task.task_name}")
             return True
             
         except Exception as e:
             print(f"[SheetsService] Error adding task: {e}")
             return False
-    
-    def _apply_row_formatting(self, row_num: int, reply_status: str):
-        """Apply conditional formatting based on reply status."""
-        try:
-            # Color code based on reply status
-            if reply_status == "Replied":
-                bg_color = {'red': 0.85, 'green': 0.95, 'blue': 0.85}  # Light green
-            elif reply_status == "Pending":
-                bg_color = {'red': 1.0, 'green': 0.95, 'blue': 0.8}  # Light yellow
-            else:  # No Reply
-                bg_color = {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White
-                
-            self.sheet.format(f'A{row_num}:P{row_num}', {
-                'backgroundColor': bg_color
-            })
-        except:
-            pass  # Silently fail if formatting doesn't work
     
     def find_thread_row(self, thread_id: str) -> Optional[int]:
         """
@@ -402,9 +395,6 @@ class GoogleSheetsService:
             
             # Batch update
             self.sheet.batch_update(updates)
-            
-            # Update formatting
-            self._apply_row_formatting(row_num, 'Replied')
             
             print(f"[SheetsService] Updated thread {thread_id} at row {row_num}")
             return True
