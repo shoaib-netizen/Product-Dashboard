@@ -96,7 +96,7 @@ class EmailToSheetsAgent:
                     # Get current reply count and increment
                     current_count = 0
                     try:
-                        current_count_val = self.sheets.sheet.cell(existing_row, 13).value  # Column M
+                        current_count_val = self.sheets.sheet.cell(existing_row, 12).value  # Column L
                         current_count = int(current_count_val) if current_count_val else 0
                     except:
                         pass

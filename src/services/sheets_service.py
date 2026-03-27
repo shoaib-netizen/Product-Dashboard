@@ -30,7 +30,6 @@ class GoogleSheetsService:
         "Sender Email",
         "Recipient Email",
         "Date Sent",
-        "Date Received",
         "Task Name",
         "Email Summary",
         "Team Origin",
@@ -39,8 +38,7 @@ class GoogleSheetsService:
         "Replied By",
         "Reply Date",
         "Reply Summary",
-        "Task Status",
-        "Date of Solution"
+        "Task Status"
     ]
     
     def __init__(self):
@@ -95,10 +93,10 @@ class GoogleSheetsService:
             first_row = self.sheet.row_values(1)
             if not first_row or first_row != self.HEADERS:
                 # Update headers
-                self.sheet.update('A1:R1', [self.HEADERS])
+                self.sheet.update('A1:P1', [self.HEADERS])
                 
                 # Format header row (blue background, white bold text, centered)
-                self.sheet.format('A1:R1', {
+                self.sheet.format('A1:P1', {
                     'backgroundColor': {'red': 0.2, 'green': 0.4, 'blue': 0.8},
                     'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}},
                     'horizontalAlignment': 'CENTER',
@@ -108,10 +106,10 @@ class GoogleSheetsService:
                 # Freeze header row
                 self.sheet.freeze(rows=1)
                 
-                print(f"[SheetsService] Headers formatted with 18 columns")
+                print(f"[SheetsService] Headers formatted with 16 columns")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
-            self.sheet.update('A1:R1', [self.HEADERS])
+            self.sheet.update('A1:P1', [self.HEADERS])
     
     def _get_next_sn(self) -> int:
         """Get the next serial number."""
@@ -144,7 +142,6 @@ class GoogleSheetsService:
                 task.sender_email,
                 task.recipient_email,
                 task.date_sent,
-                task.date_received,
                 task.task_name,
                 task.email_summary,
                 task.team_origin,
@@ -153,8 +150,7 @@ class GoogleSheetsService:
                 task.replied_by,
                 task.reply_date,
                 task.reply_summary,
-                task.status,
-                task.date_of_solution
+                task.status
             ]
             
             self.sheet.append_row(row, value_input_option='USER_ENTERED')
@@ -181,7 +177,7 @@ class GoogleSheetsService:
             else:  # No Reply
                 bg_color = {'red': 1.0, 'green': 1.0, 'blue': 1.0}  # White
                 
-            self.sheet.format(f'A{row_num}:R{row_num}', {
+            self.sheet.format(f'A{row_num}:P{row_num}', {
                 'backgroundColor': bg_color
             })
         except:
@@ -229,40 +225,40 @@ class GoogleSheetsService:
                 print(f"[SheetsService] Thread {thread_id} not found")
                 return False
             
-            # Update columns: L=Reply Status, M=Reply Count, N=Replied By, O=Reply Date, P=Reply Summary
+            # Update columns: K=Reply Status, L=Reply Count, M=Replied By, N=Reply Date, O=Reply Summary
             updates = []
             
-            # Column L (12): Reply Status
+            # Column K (11): Reply Status
             updates.append({
-                'range': f'L{row_num}',
+                'range': f'K{row_num}',
                 'values': [['Replied']]
             })
             
-            # Column M (13): Reply Count
+            # Column L (12): Reply Count
             if 'reply_count' in reply_data:
                 updates.append({
-                    'range': f'M{row_num}',
+                    'range': f'L{row_num}',
                     'values': [[str(reply_data['reply_count'])]]
                 })
             
-            # Column N (14): Replied By
+            # Column M (13): Replied By
             if 'replied_by' in reply_data:
                 updates.append({
-                    'range': f'N{row_num}',
+                    'range': f'M{row_num}',
                     'values': [[reply_data['replied_by']]]
                 })
             
-            # Column O (15): Reply Date
+            # Column N (14): Reply Date
             if 'reply_date' in reply_data:
                 updates.append({
-                    'range': f'O{row_num}',
+                    'range': f'N{row_num}',
                     'values': [[reply_data['reply_date']]]
                 })
             
-            # Column P (16): Reply Summary
+            # Column O (15): Reply Summary
             if 'reply_summary' in reply_data:
                 updates.append({
-                    'range': f'P{row_num}',
+                    'range': f'O{row_num}',
                     'values': [[reply_data['reply_summary']]]
                 })
             
