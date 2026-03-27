@@ -79,7 +79,8 @@ class GmailService:
         # Get yesterday's date for filtering (after yesterday = today and onwards)
         yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y/%m/%d')
         
-        query = f"is:unread label:{Config.GMAIL_LABEL_FILTER} after:{yesterday}"
+        # Fetch ALL emails from today (including already read ones)
+        query = f"label:{Config.GMAIL_LABEL_FILTER} after:{yesterday}"
         
         # Filter for Product Engineering emails only
         if Config.FILTER_PRODUCT_ENGINEERING:
@@ -243,13 +244,23 @@ class GmailService:
                 date_sent = now.strftime('%Y-%m-%d %H:%M')
                 date_received = now.strftime('%Y-%m-%d %H:%M')
             
-            # Extract recipient (To field)
-            to_field = headers.get('To', headers.get('Delivered-To', 'Unknown'))
+            # Extract all recipients (To + CC fields)
+            to_field = headers.get('To', '')
+            cc_field = headers.get('Cc', '')
+            
+            # Combine To and CC recipients
+            all_recipients = []
+            if to_field:
+                all_recipients.append(to_field)
+            if cc_field:
+                all_recipients.append(cc_field)
+            
+            recipients_str = ', '.join(all_recipients) if all_recipients else 'Unknown'
             
             return {
                 'subject': headers.get('Subject', 'No Subject'),
                 'from': headers.get('From', 'Unknown'),
-                'to': to_field,
+                'to': recipients_str,
                 'date': date_sent.split(' ')[0],  # Keep for backward compatibility
                 'date_sent': date_sent,
                 'date_received': date_received,

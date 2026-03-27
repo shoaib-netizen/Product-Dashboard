@@ -4,6 +4,7 @@ Email Parser Agent - Uses Groq LLM to intelligently extract task data from email
 import json
 from datetime import datetime
 from groq import Groq
+import google.generativeai as genai
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -97,9 +98,13 @@ Respond ONLY with valid JSON matching this structure:
 }"""
 
     def __init__(self):
-        """Initialize the Email Parser Agent with Groq client."""
+        """Initialize the Email Parser Agent with Groq and Gemini clients."""
         self.client = Groq(api_key=Config.GROQ_API_KEY)
         self.model = Config.GROQ_MODEL
+        
+        # Configure Gemini as fallback
+        genai.configure(api_key=Config.GEMINI_API_KEY)
+        self.gemini_model = genai.GenerativeModel(Config.GEMINI_MODEL)
     
     def parse_email(self, email_data: dict) -> Optional[TaskData]:
         """
@@ -118,6 +123,7 @@ Respond ONLY with valid JSON matching this structure:
         email_content = self._format_email_for_parsing(email_data)
         
         try:
+            # Try Groq first
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
@@ -133,8 +139,44 @@ Respond ONLY with valid JSON matching this structure:
             return TaskData(**result)
             
         except Exception as e:
-            print(f"[EmailParserAgent] Error parsing email: {e}")
-            return self._fallback_parse(email_data)
+            # Check if it's a rate limit error from Groq
+            if "rate_limit" in str(e).lower() or "429" in str(e):
+                print(f"[EmailParserAgent] Groq rate limit hit, trying Gemini fallback...")
+                try:
+                    return self._parse_with_gemini(email_content, email_data)
+                except Exception as gemini_error:
+                    print(f"[EmailParserAgent] Gemini also failed: {gemini_error}")
+                    return self._fallback_parse(email_data)
+            else:
+                print(f"[EmailParserAgent] Error parsing email: {e}")
+                return self._fallback_parse(email_data)
+    
+    def _parse_with_gemini(self, email_content: str, email_data: dict) -> TaskData:
+        """
+        Parse email using Google Gemini API as fallback.
+        
+        Args:
+            email_content: Formatted email content
+            email_data: Original email data dictionary
+            
+        Returns:
+            TaskData object with extracted fields
+        """
+        prompt = f"""{self.SYSTEM_PROMPT}
+
+{email_content}"""
+        
+        response = self.gemini_model.generate_content(prompt)
+        result_text = response.text
+        
+        # Extract JSON from response (Gemini might wrap it in markdown)
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0].strip()
+        
+        result = json.loads(result_text)
+        return TaskData(**result)
     
     def _format_email_for_parsing(self, email_data: dict) -> str:
         """Format email data into a prompt for the LLM."""

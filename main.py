@@ -101,10 +101,30 @@ class EmailToSheetsAgent:
                     except:
                         pass
                     
+                    # Get current replied_by list and append new responder
+                    current_replied_by = ""
+                    try:
+                        current_replied_by = self.sheets.sheet.cell(existing_row, 13).value or ""  # Column M
+                    except:
+                        pass
+                    
+                    # Format new responder with email
+                    new_responder = email.get('from', 'Unknown')
+                    
+                    # Append to list if not already there
+                    if current_replied_by:
+                        # Check if this person already replied
+                        if new_responder not in current_replied_by:
+                            replied_by_list = current_replied_by + "; " + new_responder
+                        else:
+                            replied_by_list = current_replied_by
+                    else:
+                        replied_by_list = new_responder
+                    
                     # Update the thread with reply information
                     reply_data = {
                         'reply_count': current_count + 1,
-                        'replied_by': reply_task.sender_name if reply_task else email.get('from', 'Unknown'),
+                        'replied_by': replied_by_list,
                         'reply_date': reply_task.date_sent if reply_task else email.get('date_sent', ''),
                         'reply_summary': reply_task.email_summary if reply_task else ''
                     }
@@ -136,20 +156,33 @@ class EmailToSheetsAgent:
                             if self.sheets.add_task(original_task):
                                 logger.info(f"  ✓ Added original: {original_task.task_name}")
                                 
-                                # If there are replies (more than 1 message), update with latest reply
+                                # If there are replies (more than 1 message), update with reply info
                                 if len(thread_messages) > 1:
                                     latest_reply = thread_messages[-1]  # Last message is latest reply
                                     reply_task = self.parser.parse_email(latest_reply)
                                     
+                                    # Collect all unique responders from the thread (skip original sender)
+                                    original_from = original_email.get('from', '')
+                                    responders = []
+                                    seen = set()
+                                    
+                                    for msg in thread_messages[1:]:  # Skip first message (original)
+                                        responder = msg.get('from', 'Unknown')
+                                        if responder and responder not in seen and responder != original_from:
+                                            responders.append(responder)
+                                            seen.add(responder)
+                                    
+                                    replied_by_list = "; ".join(responders) if responders else latest_reply.get('from', 'Unknown')
+                                    
                                     reply_data = {
                                         'reply_count': len(thread_messages) - 1,  # Total replies
-                                        'replied_by': reply_task.sender_name if reply_task else latest_reply.get('from', 'Unknown'),
+                                        'replied_by': replied_by_list,
                                         'reply_date': reply_task.date_sent if reply_task else latest_reply.get('date_sent', ''),
                                         'reply_summary': reply_task.email_summary if reply_task else ''
                                     }
                                     
                                     self.sheets.update_thread_reply(thread_id, reply_data)
-                                    logger.info(f"  ✓ Updated with {len(thread_messages) - 1} reply(s)")
+                                    logger.info(f"  ✓ Updated with {len(thread_messages) - 1} reply(s) from {len(responders)} person(s)")
                                 
                                 # Mark the current email as read
                                 self.gmail.mark_as_read(email['message_id'])
@@ -249,14 +282,27 @@ class EmailToSheetsAgent:
                         if self.sheets.add_task(original_task):
                             logger.info(f"  ✓ Added: {original_task.task_name}")
                             
-                            # If there are replies, update with latest reply
+                            # If there are replies, update with reply info
                             if len(thread_messages) > 1:
                                 latest_reply = thread_messages[-1]
                                 reply_task = self.parser.parse_email(latest_reply)
                                 
+                                # Collect all unique responders from the thread
+                                original_from = original_email.get('from', '')
+                                responders = []
+                                seen = set()
+                                
+                                for msg in thread_messages[1:]:  # Skip first message (original)
+                                    responder = msg.get('from', 'Unknown')
+                                    if responder and responder not in seen and responder != original_from:
+                                        responders.append(responder)
+                                        seen.add(responder)
+                                
+                                replied_by_list = "; ".join(responders) if responders else latest_reply.get('from', 'Unknown')
+                                
                                 reply_data = {
                                     'reply_count': len(thread_messages) - 1,
-                                    'replied_by': reply_task.sender_name if reply_task else latest_reply.get('from', 'Unknown'),
+                                    'replied_by': replied_by_list,
                                     'reply_date': reply_task.date_sent if reply_task else latest_reply.get('date_sent', ''),
                                     'reply_summary': reply_task.email_summary if reply_task else ''
                                 }
