@@ -49,7 +49,37 @@ class EmailToSheetsAgent:
         self.parser = EmailParserAgent()
         self.sheets = GoogleSheetsService()
         
+        # Track processed threads within a session to prevent duplicates
+        self.processed_threads = set()
+        
         logger.info("✓ All components initialized successfully")
+    
+    def _is_internal_sender(self, email_address: str) -> bool:
+        """Check if email address is from internal team."""
+        if '<' in email_address and '>' in email_address:
+            email_address = email_address.split('<')[1].split('>')[0].strip()
+        return email_address.lower().strip() in Config.INTERNAL_TEAM_EMAILS
+    
+    def _should_skip_email(self, email: dict, is_reply: bool, thread_exists: bool) -> tuple[bool, str]:
+        """
+        Determine if an email should be skipped based on internal team filtering.
+        
+        Returns:
+            Tuple of (should_skip: bool, reason: str)
+        """
+        sender = email.get('from', '')
+        
+        # Always process if it's a reply to an existing thread
+        if is_reply and thread_exists:
+            return False, ""
+        
+        # For new threads: skip if internal team is initiating
+        if self._is_internal_sender(sender):
+            if not is_reply:
+                return True, f"Internal sender initiated thread: {sender}"
+            return False, ""
+        
+        return False, ""
     
     def process_emails(self, max_emails: int = 10) -> int:
         """
@@ -86,6 +116,24 @@ class EmailToSheetsAgent:
                 # Determine if this is a reply (subject starts with Re: or thread exists)
                 is_reply = subject.startswith('Re:') or subject.startswith('回复：')
                 
+                # Check if we should skip this email (internal team initiated)
+                should_skip, skip_reason = self._should_skip_email(email, is_reply, existing_row is not None)
+                if should_skip:
+                    logger.info(f"  → Skipping: {skip_reason}")
+                    self.gmail.mark_as_read(email['message_id'])
+                    continue
+                
+                # Check if we already processed this thread in this session (prevent duplicates)
+                if thread_id in self.processed_threads:
+                    logger.info(f"  → Skipping: already processed this thread in this session")
+                    self.gmail.mark_as_read(email['message_id'])
+                    continue
+                
+                # Mark thread as processed IMMEDIATELY to prevent duplicates
+                # even if an error occurs mid-processing
+                if thread_id:
+                    self.processed_threads.add(thread_id)
+                
                 if is_reply and existing_row:
                     # This is a reply to an existing thread - update the row
                     logger.info(f"  → Reply detected for existing thread")
@@ -103,11 +151,11 @@ class EmailToSheetsAgent:
                     # Get current replied_by list and build unique responders list
                     current_replied_by = ""
                     try:
-                        current_replied_by = self.sheets.sheet.cell(existing_row, 12).value or ""  # Column L (Replied By)
+                        current_replied_by = self.sheets.sheet.cell(existing_row, 11).value or ""  # Column K (Replied By)
                     except:
                         pass
                     
-                    # Format new responder with email
+                    # Format new responder
                     new_responder = email.get('from', 'Unknown')
                     
                     # Extract email address for comparison (handles "Name <email@domain.com>" format)
@@ -116,8 +164,17 @@ class EmailToSheetsAgent:
                             return responder_str.split('<')[1].split('>')[0].strip().lower()
                         return responder_str.strip().lower()
                     
+                    # Extract just the name from "Name <email@domain.com>" format
+                    def extract_name(responder_str):
+                        if '<' in responder_str:
+                            name = responder_str.split('<')[0].strip().strip('"').strip("'")
+                            if name:
+                                return name
+                        return responder_str.strip()
+                    
                     new_email = extract_email(new_responder)
                     original_email = extract_email(original_sender)
+                    new_name = extract_name(new_responder)
                     
                     # Build unique responders list (exclude original sender)
                     responders_set = set()
@@ -128,17 +185,17 @@ class EmailToSheetsAgent:
                         for resp in current_replied_by.split(';'):
                             resp = resp.strip()
                             if resp:
-                                resp_email = extract_email(resp)
-                                if resp_email != original_email and resp_email not in responders_set:
-                                    responders_set.add(resp_email)
+                                resp_lower = resp.lower()
+                                if resp_lower not in responders_set:
+                                    responders_set.add(resp_lower)
                                     responders_list.append(resp)
                     
-                    # Add new responder if not original sender and not duplicate
-                    if new_email != original_email and new_email not in responders_set:
-                        responders_set.add(new_email)
-                        responders_list.append(new_responder)
+                    # Add new responder name if not original sender and not duplicate
+                    if new_email != original_email and new_name.lower() not in responders_set:
+                        responders_set.add(new_name.lower())
+                        responders_list.append(new_name)
                     
-                    replied_by_list = "; ".join(responders_list) if responders_list else new_responder
+                    replied_by_list = "; ".join(responders_list) if responders_list else new_name
                     
                     # Update the thread with reply information
                     reply_data = {
@@ -165,7 +222,14 @@ class EmailToSheetsAgent:
                     if thread_messages and len(thread_messages) > 0:
                         # First message is the original email
                         original_email = thread_messages[0]
+                        original_sender = original_email.get('from', '')
                         logger.info(f"  → Found {len(thread_messages)} messages in thread")
+                        
+                        # Check if original sender is internal - if so, skip entire thread
+                        if self._is_internal_sender(original_sender):
+                            logger.info(f"  → Skipping thread: initiated by internal team member {original_sender}")
+                            self.gmail.mark_as_read(email['message_id'])
+                            continue
                         
                         # Parse the original email
                         original_task = self.parser.parse_email(original_email)
@@ -180,18 +244,26 @@ class EmailToSheetsAgent:
                                     latest_reply = thread_messages[-1]  # Last message is latest reply
                                     reply_task = self.parser.parse_email(latest_reply)
                                     
-                                    # Collect all unique responders from the thread (skip original sender)
+                                    # Collect all unique responder names from the thread (skip original sender)
                                     original_from = original_email.get('from', '')
-                                    responders = []
-                                    seen = set()
+                                    original_from_email = original_from.split('<')[1].split('>')[0].strip().lower() if '<' in original_from else original_from.strip().lower()
+                                    responder_names = []
+                                    seen_names = set()
                                     
                                     for msg in thread_messages[1:]:  # Skip first message (original)
                                         responder = msg.get('from', 'Unknown')
-                                        if responder and responder not in seen and responder != original_from:
-                                            responders.append(responder)
-                                            seen.add(responder)
+                                        # Extract email for comparison
+                                        resp_email = responder.split('<')[1].split('>')[0].strip().lower() if '<' in responder else responder.strip().lower()
+                                        # Extract just the name
+                                        resp_name = responder.split('<')[0].strip().strip('"').strip("'") if '<' in responder else responder.strip()
+                                        
+                                        if resp_email != original_from_email and resp_name.lower() not in seen_names and resp_name:
+                                            responder_names.append(resp_name)
+                                            seen_names.add(resp_name.lower())
                                     
-                                    replied_by_list = "; ".join(responders) if responders else latest_reply.get('from', 'Unknown')
+                                    latest_from = latest_reply.get('from', 'Unknown')
+                                    latest_name = latest_from.split('<')[0].strip().strip('"').strip("'") if '<' in latest_from else latest_from.strip()
+                                    replied_by_list = "; ".join(responder_names) if responder_names else latest_name
                                     
                                     reply_data = {
                                         'replied_by': replied_by_list,
@@ -200,7 +272,7 @@ class EmailToSheetsAgent:
                                     }
                                     
                                     self.sheets.update_thread_reply(thread_id, reply_data)
-                                    logger.info(f"  ✓ Updated with {len(thread_messages) - 1} reply(s) from {len(responders)} person(s)")
+                                    logger.info(f"  ✓ Updated with {len(thread_messages) - 1} reply(s) from {len(responder_names)} person(s)")
                                 
                                 # Mark the current email as read
                                 self.gmail.mark_as_read(email['message_id'])

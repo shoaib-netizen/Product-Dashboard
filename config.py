@@ -34,6 +34,16 @@ class Config:
     PRODUCT_ENGINEERING_EMAIL: str = os.getenv("PRODUCT_ENGINEERING_EMAIL", "engineering@onescreensolutions.com")
     IGNORED_EMAILS: list = os.getenv("IGNORED_EMAILS", "donotreply@onescreensolutions.com,sage@onescreensolutions.com,noreply@bytello.com").split(",")
     
+    # Internal team emails - don't log emails initiated by these addresses
+    INTERNAL_TEAM_EMAILS: list = [
+        email.strip().lower() 
+        for email in os.getenv(
+            "INTERNAL_TEAM_EMAILS", 
+            "faizan@onescreensolutions.com,fatir@onescreensolutions.com,abdullah@onescreensolutions.com,nasir@onescreensolutions.com,huzaifa@onescreensolutions.com,shoaib@onescreensolutions.com,qursam@onescreensolutions.com,zaman@onescreensolutions.com,engineering@onescreensolutions.com,ops@onescreensolutions.com"
+        ).split(",")
+        if email.strip()
+    ]
+    
     # Server Configuration
     PORT: int = int(os.getenv("PORT", "10000"))
     
