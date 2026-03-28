@@ -152,8 +152,8 @@ class GmailService:
                 if (i + 1) % 50 == 0:
                     print(f"[GmailService] Processed {i + 1}/{len(all_messages)} email details...")
             
-            # Sort by date sent (newest first - descending order)
-            emails.sort(key=lambda x: x.get('date_sent', ''), reverse=True)
+            # Sort by date sent (oldest first - ascending order)
+            emails.sort(key=lambda x: x.get('date_sent', ''), reverse=False)
             
             return emails
             
@@ -218,8 +218,8 @@ class GmailService:
                 if not page_token or len(emails) >= max_results:
                     break
             
-            # Sort by date sent (newest first - descending order)
-            emails.sort(key=lambda x: x.get('date_sent', ''), reverse=True)
+            # Sort by date sent (oldest first - ascending order)
+            emails.sort(key=lambda x: x.get('date_sent', ''), reverse=False)
             
             print(f"[GmailService] Fetched {len(emails)} emails from {start_date} to {end_date}")
             return emails
