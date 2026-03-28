@@ -444,12 +444,14 @@ class EmailToSheetsAgent:
             logger.info("\nStopping watch mode...")
 
 
+# Global agent instance for Flask app
+_flask_agent = None
+
 def create_flask_app():
     """Create Flask app for Render deployment."""
     from flask import Flask, jsonify
     
     app = Flask(__name__)
-    agent = None
     
     @app.route('/')
     def home():
@@ -466,11 +468,11 @@ def create_flask_app():
     @app.route('/process', methods=['GET', 'POST'])
     def process_now():
         """Manually trigger email processing."""
-        global agent
-        if agent is None:
-            agent = EmailToSheetsAgent()
+        global _flask_agent
+        if _flask_agent is None:
+            _flask_agent = EmailToSheetsAgent()
         
-        count = agent.process_emails()
+        count = _flask_agent.process_emails()
         return jsonify({
             "status": "success",
             "processed": count
