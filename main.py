@@ -81,22 +81,20 @@ class EmailToSheetsAgent:
         
         return False, ""
     
-    def process_emails(self, max_emails: int = 10) -> int:
+    def process_emails(self) -> int:
         """
-        Process unread emails and store in Google Sheets.
+        Process emails and store in Google Sheets.
+        Fetches ALL matching emails (no limit).
         
-        Args:
-            max_emails: Maximum number of emails to process
-            
         Returns:
             Number of emails processed
         """
-        logger.info(f"Checking for new emails (max: {max_emails})...")
+        logger.info("Checking for new emails...")
         
-        # Fetch recent emails (read or unread) - will skip those already in sheet
-        # If INITIAL_IMPORT=true: fetches from Jan 1, 2026
-        # If INITIAL_IMPORT=false: fetches last 7 days only
-        emails = self.gmail.fetch_recent_emails(max_results=max_emails)
+        # Fetch ALL recent emails (read or unread) - will skip those already in sheet
+        # If INITIAL_IMPORT=true: fetches ALL from Jan 1, 2026
+        # If INITIAL_IMPORT=false: fetches ALL from last 7 days
+        emails = self.gmail.fetch_recent_emails()
         
         if not emails:
             logger.info("No new emails found")
@@ -315,10 +313,8 @@ class EmailToSheetsAgent:
         """Run single processing cycle."""
         logger.info("=" * 50)
         logger.info("Running single processing cycle")
-        # Use higher limit for initial import, normal limit for regular runs
-        max_emails = 500 if Config.INITIAL_IMPORT else 50
-        logger.info(f"INITIAL_IMPORT={Config.INITIAL_IMPORT}, max_emails={max_emails}")
-        count = self.process_emails(max_emails=max_emails)
+        logger.info(f"INITIAL_IMPORT={Config.INITIAL_IMPORT}")
+        count = self.process_emails()
         logger.info(f"Completed. Processed {count} emails.")
         return count
     

@@ -82,16 +82,13 @@ class GmailService:
         
         return creds
     
-    def fetch_recent_emails(self, max_results: int = 10) -> list[dict]:
+    def fetch_recent_emails(self) -> list[dict]:
         """
-        Fetch recent emails from inbox (read or unread).
+        Fetch ALL recent emails from inbox (read or unread).
         
-        If INITIAL_IMPORT=true: fetches from Jan 1, 2026
-        If INITIAL_IMPORT=false: fetches last 7 days only
+        If INITIAL_IMPORT=true: fetches ALL emails from Jan 1, 2026
+        If INITIAL_IMPORT=false: fetches ALL emails from last 7 days
         
-        Args:
-            max_results: Maximum number of emails to fetch
-            
         Returns:
             List of email dictionaries with subject, from, date, body
         """
@@ -100,10 +97,10 @@ class GmailService:
         # Determine start date based on INITIAL_IMPORT setting
         if Config.INITIAL_IMPORT:
             start_date = "2026/01/01"
-            print(f"[GmailService] INITIAL_IMPORT mode: fetching from {start_date}")
+            print(f"[GmailService] INITIAL_IMPORT mode: fetching ALL from {start_date}")
         else:
             start_date = (datetime.now() - timedelta(days=7)).strftime('%Y/%m/%d')
-            print(f"[GmailService] Normal mode: fetching from {start_date}")
+            print(f"[GmailService] Normal mode: fetching ALL from {start_date}")
         
         # Fetch ALL emails (read or unread) - we'll filter by what's in the sheet later
         query = f"label:{Config.GMAIL_LABEL_FILTER} after:{start_date}"
@@ -121,20 +118,39 @@ class GmailService:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
         
         try:
-            results = self.service.users().messages().list(
-                userId='me',
-                q=query,
-                maxResults=max_results
-            ).execute()
+            # Paginate through ALL results
+            all_messages = []
+            page_token = None
             
-            messages = results.get('messages', [])
+            while True:
+                results = self.service.users().messages().list(
+                    userId='me',
+                    q=query,
+                    maxResults=500,  # Max allowed by Gmail API per request
+                    pageToken=page_token
+                ).execute()
+                
+                messages = results.get('messages', [])
+                all_messages.extend(messages)
+                
+                page_token = results.get('nextPageToken')
+                if not page_token:
+                    break
+                    
+                print(f"[GmailService] Fetched {len(all_messages)} emails so far...")
+            
+            print(f"[GmailService] Total emails found: {len(all_messages)}")
+            
             emails = []
-            
-            for msg in messages:
+            for i, msg in enumerate(all_messages):
                 email_data = self._get_email_details(msg['id'])
                 if email_data:
                     email_data['message_id'] = msg['id']
                     emails.append(email_data)
+                
+                # Progress update every 50 emails
+                if (i + 1) % 50 == 0:
+                    print(f"[GmailService] Processed {i + 1}/{len(all_messages)} email details...")
             
             # Sort by date sent (newest first - descending order)
             emails.sort(key=lambda x: x.get('date_sent', ''), reverse=True)
