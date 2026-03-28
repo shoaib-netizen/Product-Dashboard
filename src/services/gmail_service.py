@@ -35,8 +35,16 @@ class GmailService:
         """Authenticate with Gmail API using OAuth2."""
         creds = None
         
-        # Load existing token
-        if os.path.exists(Config.GMAIL_TOKEN_PATH):
+        # Try loading token from environment variable first (for Render deployment)
+        gmail_token_json = os.getenv("GMAIL_TOKEN_JSON")
+        gmail_credentials_json = os.getenv("GMAIL_CREDENTIALS_JSON")
+        
+        if gmail_token_json:
+            # Load token from env var (Render deployment)
+            token_data = json.loads(gmail_token_json)
+            creds = Credentials.from_authorized_user_info(token_data, Config.GMAIL_SCOPES)
+        elif os.path.exists(Config.GMAIL_TOKEN_PATH):
+            # Load token from file (local development)
             creds = Credentials.from_authorized_user_file(
                 Config.GMAIL_TOKEN_PATH, 
                 Config.GMAIL_SCOPES
@@ -46,7 +54,17 @@ class GmailService:
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+                # Update env-based token won't persist, but save to file if local
+                if not gmail_token_json:
+                    with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
+                        token.write(creds.to_json())
             else:
+                # Browser flow only works locally
+                if gmail_token_json or gmail_credentials_json:
+                    raise RuntimeError(
+                        "Gmail token expired and cannot re-authenticate on Render. "
+                        "Please regenerate token.json locally and update GMAIL_TOKEN_JSON env var."
+                    )
                 if not os.path.exists(Config.GMAIL_CREDENTIALS_PATH):
                     raise FileNotFoundError(
                         f"Gmail credentials not found at {Config.GMAIL_CREDENTIALS_PATH}. "
@@ -57,10 +75,10 @@ class GmailService:
                     Config.GMAIL_SCOPES
                 )
                 creds = flow.run_local_server(port=0)
-            
-            # Save credentials for future use
-            with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
-                token.write(creds.to_json())
+                
+                # Save credentials for future use
+                with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
+                    token.write(creds.to_json())
         
         return creds
     
