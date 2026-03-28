@@ -44,6 +44,7 @@ logs/
 # Local development
 .env.local
 .env.development
+.env.production
 
 # OS
 .DS_Store

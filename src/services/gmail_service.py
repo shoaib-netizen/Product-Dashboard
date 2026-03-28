@@ -82,23 +82,24 @@ class GmailService:
         
         return creds
     
-    def fetch_unread_emails(self, max_results: int = 10) -> list[dict]:
+    def fetch_recent_emails(self, max_results: int = 10, days_back: int = 7) -> list[dict]:
         """
-        Fetch unread emails from inbox.
+        Fetch recent emails from inbox (read or unread).
         
         Args:
             max_results: Maximum number of emails to fetch
+            days_back: How many days back to look for emails
             
         Returns:
             List of email dictionaries with subject, from, date, body
         """
         from datetime import datetime, timedelta
         
-        # Get yesterday's date for filtering (after yesterday = today and onwards)
-        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y/%m/%d')
+        # Look back specified number of days
+        start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y/%m/%d')
         
-        # Fetch ALL emails from today (including already read ones)
-        query = f"label:{Config.GMAIL_LABEL_FILTER} after:{yesterday}"
+        # Fetch ALL emails (read or unread) - we'll filter by what's in the sheet later
+        query = f"label:{Config.GMAIL_LABEL_FILTER} after:{start_date}"
         
         # Filter for Product Engineering emails only
         if Config.FILTER_PRODUCT_ENGINEERING:

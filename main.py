@@ -93,8 +93,8 @@ class EmailToSheetsAgent:
         """
         logger.info(f"Checking for new emails (max: {max_emails})...")
         
-        # Fetch unread emails
-        emails = self.gmail.fetch_unread_emails(max_results=max_emails)
+        # Fetch recent emails (read or unread) - will skip those already in sheet
+        emails = self.gmail.fetch_recent_emails(max_results=max_emails, days_back=7)
         
         if not emails:
             logger.info("No new emails found")
@@ -283,6 +283,10 @@ class EmailToSheetsAgent:
                             logger.warning(f"  ✗ Failed to parse original email")
                     else:
                         logger.warning(f"  ✗ Could not fetch thread messages")
+                elif existing_row:
+                    # Thread already in sheet and this is not a reply - skip
+                    logger.info(f"  → Skipping: thread already in sheet")
+                    continue
                 else:
                     # New thread - parse and add as new row
                     task_data = self.parser.parse_email(email)
