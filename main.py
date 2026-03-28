@@ -94,7 +94,9 @@ class EmailToSheetsAgent:
         logger.info(f"Checking for new emails (max: {max_emails})...")
         
         # Fetch recent emails (read or unread) - will skip those already in sheet
-        emails = self.gmail.fetch_recent_emails(max_results=max_emails, days_back=7)
+        # If INITIAL_IMPORT=true: fetches from Jan 1, 2026
+        # If INITIAL_IMPORT=false: fetches last 7 days only
+        emails = self.gmail.fetch_recent_emails(max_results=max_emails)
         
         if not emails:
             logger.info("No new emails found")
@@ -313,7 +315,10 @@ class EmailToSheetsAgent:
         """Run single processing cycle."""
         logger.info("=" * 50)
         logger.info("Running single processing cycle")
-        count = self.process_emails(max_emails=20)
+        # Use higher limit for initial import, normal limit for regular runs
+        max_emails = 500 if Config.INITIAL_IMPORT else 50
+        logger.info(f"INITIAL_IMPORT={Config.INITIAL_IMPORT}, max_emails={max_emails}")
+        count = self.process_emails(max_emails=max_emails)
         logger.info(f"Completed. Processed {count} emails.")
         return count
     

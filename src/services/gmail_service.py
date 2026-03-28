@@ -82,21 +82,28 @@ class GmailService:
         
         return creds
     
-    def fetch_recent_emails(self, max_results: int = 10, days_back: int = 7) -> list[dict]:
+    def fetch_recent_emails(self, max_results: int = 10) -> list[dict]:
         """
         Fetch recent emails from inbox (read or unread).
         
+        If INITIAL_IMPORT=true: fetches from Jan 1, 2026
+        If INITIAL_IMPORT=false: fetches last 7 days only
+        
         Args:
             max_results: Maximum number of emails to fetch
-            days_back: How many days back to look for emails
             
         Returns:
             List of email dictionaries with subject, from, date, body
         """
         from datetime import datetime, timedelta
         
-        # Look back specified number of days
-        start_date = (datetime.now() - timedelta(days=days_back)).strftime('%Y/%m/%d')
+        # Determine start date based on INITIAL_IMPORT setting
+        if Config.INITIAL_IMPORT:
+            start_date = "2026/01/01"
+            print(f"[GmailService] INITIAL_IMPORT mode: fetching from {start_date}")
+        else:
+            start_date = (datetime.now() - timedelta(days=7)).strftime('%Y/%m/%d')
+            print(f"[GmailService] Normal mode: fetching from {start_date}")
         
         # Fetch ALL emails (read or unread) - we'll filter by what's in the sheet later
         query = f"label:{Config.GMAIL_LABEL_FILTER} after:{start_date}"

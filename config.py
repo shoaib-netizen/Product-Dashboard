@@ -47,6 +47,10 @@ class Config:
     # Server Configuration
     PORT: int = int(os.getenv("PORT", "10000"))
     
+    # Initial Import Mode - set to true for first run to import from Jan 1, 2026
+    # After successful import, set to false to only fetch last 7 days
+    INITIAL_IMPORT: bool = os.getenv("INITIAL_IMPORT", "false").lower() == "true"
+    
     # Gmail API Scopes
     GMAIL_SCOPES = [
         "https://www.googleapis.com/auth/gmail.readonly",
