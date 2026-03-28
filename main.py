@@ -463,7 +463,7 @@ def create_flask_app():
     def health():
         return jsonify({"status": "healthy"})
     
-    @app.route('/process', methods=['POST'])
+    @app.route('/process', methods=['GET', 'POST'])
     def process_now():
         """Manually trigger email processing."""
         global agent
