@@ -135,9 +135,10 @@ Respond ONLY with valid JSON matching this structure:
             return TaskData(**result)
             
         except Exception as e:
-            # Check if it's a rate limit error from Groq
-            if "rate_limit" in str(e).lower() or "429" in str(e):
-                print(f"[EmailParserAgent] Groq rate limit hit, trying Gemini fallback...")
+            error_str = str(e).lower()
+            # Check if it's a rate limit or authorization error from Groq
+            if "rate_limit" in error_str or "429" in str(e) or "403" in str(e) or "forbidden" in error_str or "unauthorized" in error_str:
+                print(f"[EmailParserAgent] Groq API error ({e}), trying Gemini fallback...")
                 try:
                     return self._parse_with_gemini(email_content, email_data)
                 except Exception as gemini_error:
