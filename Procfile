@@ -1,8 +1,3 @@
-# Procfile for Render/Heroku deployment
-# Use ONE of these depending on your deployment needs:
-
-# Web server (for API endpoints and manual triggers)
-web: gunicorn "main:create_flask_app()" --bind 0.0.0.0:$PORT
-
-# Background worker (for scheduled email processing)
-worker: python scheduler.py
+# Procfile for Render deployment
+# Web server with /process endpoint (triggered by n8n every 5 mins)
+web: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120

@@ -1,38 +1,28 @@
 # Render Blueprint for Email-to-Sheets Agent
 # Deploy with: render blueprint apply
+# n8n triggers POST /process every 5 minutes
 
 services:
-  # Background Worker - Runs the email scheduler
-  - type: worker
-    name: email-agent-worker
+  - type: web
+    name: email-agent
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python scheduler.py
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: "3.11"
-      - key: GROQ_API_KEY
-        sync: false  # Set in Render dashboard
+      - key: GROQ_API_KEYS
+        sync: false  # Set in Render dashboard (comma-separated)
+      - key: GROQ_MODEL
+        value: "llama-3.1-8b-instant"
       - key: GOOGLE_SHEET_ID
         sync: false
       - key: GOOGLE_CREDENTIALS_JSON
         sync: false  # JSON string of service account
-      - key: GMAIL_CHECK_INTERVAL_MINUTES
-        value: "5"
-
-  # Optional: Web service for manual triggers and health checks
-  - type: web
-    name: email-agent-web
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:create_flask_app --bind 0.0.0.0:$PORT
-    envVars:
-      - key: PYTHON_VERSION
-        value: "3.11"
-      - key: GROQ_API_KEY
+      - key: GMAIL_TOKEN_JSON
         sync: false
-      - key: GOOGLE_SHEET_ID
+      - key: GMAIL_CREDENTIALS_JSON
         sync: false
-      - key: GOOGLE_CREDENTIALS_JSON
-        sync: false
+      - key: INITIAL_IMPORT
+        value: "false"
     healthCheckPath: /health
