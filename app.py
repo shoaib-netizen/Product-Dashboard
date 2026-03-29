@@ -3,7 +3,7 @@ Flask Web Application - Email Dashboard
 Displays email tracking data from Google Sheets in a beautiful table interface.
 Includes /process endpoint for n8n or external cron triggers.
 """
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, jsonify, request
 from src.services.sheets_service import GoogleSheetsService
 from config import Config
 import os
@@ -44,8 +44,18 @@ def _run_email_processing():
 
 @app.route('/')
 def index():
-    """Main dashboard page with email table."""
-    return render_template('index.html')
+    """Status page."""
+    return jsonify({
+        'service': 'Email-to-Sheets Agent',
+        'status': 'running',
+        'version': '1.0.0',
+        'endpoints': {
+            '/health': 'Health check',
+            '/process': 'Trigger email processing (POST)',
+            '/api/emails': 'Get all emails',
+            '/api/stats': 'Get statistics'
+        }
+    })
 
 
 @app.route('/health')
