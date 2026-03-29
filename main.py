@@ -236,6 +236,12 @@ class EmailToSheetsAgent:
                         responders_set.add(new_name.lower())
                         responders_list.append(new_name)
                     
+                    # Skip update if the only "responder" is the original sender (email to self)
+                    if not responders_list and new_email == original_email:
+                        logger.info(f"  → Skipping: reply from original sender (email to self)")
+                        self.gmail.mark_as_read(email['message_id'])
+                        continue
+                    
                     replied_by_list = "; ".join(responders_list) if responders_list else new_name
                     
                     # Determine task status based on who is replying
@@ -307,17 +313,21 @@ class EmailToSheetsAgent:
                                 latest_name = latest_from.split('<')[0].strip().strip('"').strip("'") if '<' in latest_from else latest_from.strip()
                                 replied_by_list = "; ".join(responder_names) if responder_names else latest_name
                                 
-                                # Update task object with reply info
-                                original_task.reply_status = "Replied"
-                                original_task.replied_by = replied_by_list
-                                original_task.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
-                                original_task.reply_summary = reply_task.email_summary if reply_task else ''
-                                
-                                # Determine task status based on who replied
-                                original_task.status = self._determine_task_status(thread_messages)
-                                 
-                                logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
-                                logger.info(f"  → Task status: {original_task.status}")
+                                # Only mark as replied if there are actual responders (not just original sender)
+                                if responder_names:
+                                    # Update task object with reply info
+                                    original_task.reply_status = "Replied"
+                                    original_task.replied_by = replied_by_list
+                                    original_task.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
+                                    original_task.reply_summary = reply_task.email_summary if reply_task else ''
+                                    
+                                    # Determine task status based on who replied
+                                    original_task.status = self._determine_task_status(thread_messages)
+                                     
+                                    logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
+                                    logger.info(f"  → Task status: {original_task.status}")
+                                else:
+                                    logger.info(f"  → Thread has {len(thread_messages) - 1} message(s) but only from original sender")
                             
                             # Add the task with all data included
                             if self.sheets.add_task(original_task):
@@ -377,14 +387,18 @@ class EmailToSheetsAgent:
                                 latest_name = latest_from.split('<')[0].strip().strip('"').strip("'") if '<' in latest_from else latest_from.strip()
                                 replied_by_list = "; ".join(responder_names) if responder_names else latest_name
                                 
-                                task_data.reply_status = "Replied"
-                                task_data.replied_by = replied_by_list
-                                task_data.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
-                                task_data.reply_summary = reply_task.email_summary if reply_task else ''
-                                task_data.status = self._determine_task_status(thread_messages)
-                                
-                                logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
-                                logger.info(f"  → Task status: {task_data.status}")
+                                # Only mark as replied if there are actual responders (not just original sender)
+                                if responder_names:
+                                    task_data.reply_status = "Replied"
+                                    task_data.replied_by = replied_by_list
+                                    task_data.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
+                                    task_data.reply_summary = reply_task.email_summary if reply_task else ''
+                                    task_data.status = self._determine_task_status(thread_messages)
+                                    
+                                    logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
+                                    logger.info(f"  → Task status: {task_data.status}")
+                                else:
+                                    logger.info(f"  → Thread has {len(thread_messages) - 1} message(s) but only from original sender")
                             
                             # Store in Google Sheets
                             if self.sheets.add_task(task_data):
