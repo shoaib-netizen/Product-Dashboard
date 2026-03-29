@@ -350,23 +350,88 @@ class GmailService:
             return None
     
     def _extract_body(self, payload: dict) -> str:
-        """Extract email body from payload."""
+        """Extract email body from payload, preferring plain text and stripping HTML."""
         body = ""
+        html_body = ""
         
-        if 'body' in payload and payload['body'].get('data'):
-            body = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
-        elif 'parts' in payload:
+        if 'parts' in payload:
             for part in payload['parts']:
                 if part['mimeType'] == 'text/plain':
                     if part['body'].get('data'):
                         body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
                         break
+                elif part['mimeType'] == 'text/html':
+                    if part['body'].get('data'):
+                        html_body = base64.urlsafe_b64decode(part['body']['data']).decode('utf-8')
                 elif part['mimeType'] == 'multipart/alternative':
                     body = self._extract_body(part)
                     if body:
                         break
         
+        # If no plain text found, try the payload body directly
+        if not body and 'body' in payload and payload['body'].get('data'):
+            raw = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
+            # Check if it's HTML
+            if '<html' in raw.lower() or '<div' in raw.lower() or '<p' in raw.lower():
+                html_body = raw
+            else:
+                body = raw
+        
+        # If still no plain text, convert HTML to plain text
+        if not body and html_body:
+            body = self._html_to_text(html_body)
+        
+        # Clean up excessive whitespace
+        import re
+        body = re.sub(r'\n\s*\n\s*\n+', '\n\n', body)  # Collapse 3+ blank lines to 2
+        body = re.sub(r'[ \t]+', ' ', body)  # Collapse multiple spaces/tabs
+        body = body.strip()
+        
         return body[:5000]  # Limit body length
+    
+    def _html_to_text(self, html: str) -> str:
+        """Convert HTML email body to clean plain text."""
+        import re
+        
+        text = html
+        
+        # Remove style and script blocks entirely
+        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Replace common block elements with newlines
+        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+        text = re.sub(r'</(p|div|tr|li|h[1-6])>', '\n', text, flags=re.IGNORECASE)
+        text = re.sub(r'<(p|div|tr|li|h[1-6])[^>]*>', '\n', text, flags=re.IGNORECASE)
+        
+        # Replace table cells with spaces
+        text = re.sub(r'</(td|th)>', ' ', text, flags=re.IGNORECASE)
+        
+        # Replace &nbsp; and other HTML entities
+        text = text.replace('&nbsp;', ' ')
+        text = text.replace('&amp;', '&')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        text = text.replace('&quot;', '"')
+        text = text.replace('&#39;', "'")
+        
+        # Remove all remaining HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+        
+        # Decode any remaining HTML entities
+        try:
+            import html
+            text = html.unescape(text)
+        except:
+            pass
+        
+        # Clean up whitespace
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
+        text = re.sub(r'[ \t]+', ' ', text)
+        lines = [line.strip() for line in text.splitlines()]
+        text = '\n'.join(line for line in lines if line)
+        
+        return text.strip()
     
     def mark_as_read(self, message_id: str) -> bool:
         """Mark an email as read."""

@@ -4,11 +4,15 @@ Email Parser Agent - Uses Groq LLM to intelligently extract task data from email
 import json
 from datetime import datetime
 from groq import Groq
-import google.generativeai as genai
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 from config import Config
+
+VALID_TEAM_ORIGINS = {
+    "Product Ops", "Sales", "Supply Chain & Logistics", "Engineering",
+    "Finance", "Marketing", "Support", "HR", "Legal", "Other"
+}
 
 
 class TaskData(BaseModel):
@@ -27,6 +31,13 @@ class TaskData(BaseModel):
     task_name: str = Field(description="Brief name/title of the task")
     email_summary: str = Field(description="Short summary of email body (2-3 sentences)")
     team_origin: str = Field(description="Team/department where request originated")
+
+    @field_validator('team_origin')
+    @classmethod
+    def normalize_team_origin(cls, v: str) -> str:
+        if v not in VALID_TEAM_ORIGINS:
+            return "Other"
+        return v
     
     # Reply Tracking
     reply_status: str = Field(default="No Reply", description="Replied, Pending, No Reply")
@@ -49,7 +60,7 @@ class EmailParserAgent:
     3. Returns standardized task information for Google Sheets
     """
     
-    SYSTEM_PROMPT = """You are an intelligent email parser agent for a product engineering team. Extract structured information from emails.
+    SYSTEM_PROMPT = """You are an intelligent email parser agent for a Product Ops team that manages customer and partner responses. Extract structured information from emails.
 
 Extract these fields:
 1. thread_id: Gmail thread ID (will be provided in email data)
@@ -60,18 +71,28 @@ Extract these fields:
 7. date_received: Date/time received (YYYY-MM-DD HH:MM format)
 8. task_name: Brief, clear title for the task/request (max 50 chars)
 9. email_summary: 2-3 sentence summary of the email body
-10. team_origin: Infer team/department (Engineering, Product, Support, Marketing, Sales, Unknown)
+10. team_origin: The team/department where the email request originated. Use one of these categories:
+    - "Product Ops" — Internal product operations, customer response management, product queries, coordination
+    - "Sales" — Sales inquiries, deals, pricing, proposals, partnerships, business development
+    - "Supply Chain & Logistics" — Shipping, inventory, warehousing, procurement, delivery, fulfillment, freight
+    - "Engineering" — Technical issues, bugs, feature requests, development, integrations, API
+    - "Finance" — Invoicing, billing, payments, accounting, purchase orders
+    - "Marketing" — Campaigns, branding, PR, events, content
+    - "Support" — Customer complaints, help desk, troubleshooting, RMA, returns
+    - "HR" — Recruitment, onboarding, internal team matters
+    - "Legal" — Contracts, compliance, terms, NDAs
+    - "Other" — If none of the above clearly fits
+    Classify based on email content, sender's role/department, domain, and context. When in doubt, prefer the most specific match.
 11. reply_status: "No Reply" (default for initial emails)
-12. reply_count: 0 (default for initial emails)
-13. replied_by: "" (empty for initial emails)
-14. reply_date: "" (empty for initial emails)
-15. reply_summary: "" (empty for initial emails)
-16. status: "Pending" (task completion status)
-17. date_of_solution: "" (empty if not resolved)
+12. replied_by: "" (empty for initial emails)
+13. reply_date: "" (empty for initial emails)
+14. reply_summary: "" (empty for initial emails)
+15. status: "Pending" (default task status)
+16. date_of_solution: "" (empty if not resolved)
 
 Be intelligent:
 - Extract sender name from "From" field or email signature
-- Infer team from email domain, signature, or content context
+- Infer team from email content, sender's role, domain, signature, or context
 - Create concise, actionable task names
 - Summarize the core request clearly
 
@@ -94,17 +115,19 @@ Respond ONLY with valid JSON matching this structure:
 }"""
 
     def __init__(self):
-        """Initialize the Email Parser Agent with Groq and Gemini clients."""
-        self.client = Groq(api_key=Config.GROQ_API_KEY)
+        """Initialize the Email Parser Agent with multiple Groq clients."""
+        # Initialize multiple Groq clients for fallback
+        self.groq_api_keys = Config.GROQ_API_KEYS
+        self.groq_clients = [Groq(api_key=key) for key in self.groq_api_keys if key]
         self.model = Config.GROQ_MODEL
+        self.current_groq_index = 0  # Track which key we're using
         
-        # Configure Gemini as fallback
-        genai.configure(api_key=Config.GEMINI_API_KEY)
-        self.gemini_model = genai.GenerativeModel(Config.GEMINI_MODEL)
+        print(f"[EmailParserAgent] Initialized with {len(self.groq_clients)} Groq API keys, model: {self.model}")
     
     def parse_email(self, email_data: dict) -> Optional[TaskData]:
         """
         Parse an email and extract structured task data.
+        Uses multiple Groq API keys with fallback, then Gemini as final fallback.
         
         Args:
             email_data: Dictionary containing:
@@ -116,70 +139,71 @@ Respond ONLY with valid JSON matching this structure:
         Returns:
             TaskData object with extracted fields, or None if parsing fails
         """
+        import time as _time
         email_content = self._format_email_for_parsing(email_data)
+        thread_id = email_data.get('thread_id', 'unknown')
         
-        try:
-            # Try Groq first
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": email_content}
-                ],
-                temperature=0.1,  # Low temperature for consistent extraction
-                max_tokens=1000,
-                response_format={"type": "json_object"}
-            )
-            
-            result = json.loads(response.choices[0].message.content)
-            return TaskData(**result)
-            
-        except Exception as e:
-            error_str = str(e).lower()
-            # Check if it's a rate limit or authorization error from Groq
-            if "rate_limit" in error_str or "429" in str(e) or "403" in str(e) or "forbidden" in error_str or "unauthorized" in error_str:
-                print(f"[EmailParserAgent] Groq API error ({e}), trying Gemini fallback...")
-                try:
-                    return self._parse_with_gemini(email_content, email_data)
-                except Exception as gemini_error:
-                    print(f"[EmailParserAgent] Gemini also failed: {gemini_error}")
-                    return self._fallback_parse(email_data)
-            else:
-                print(f"[EmailParserAgent] Error parsing email: {e}")
-                return self._fallback_parse(email_data)
-    
-    def _parse_with_gemini(self, email_content: str, email_data: dict) -> TaskData:
-        """
-        Parse email using Google Gemini API as fallback.
+        # Try each Groq API key with rate limit retry
+        for i, client in enumerate(self.groq_clients):
+            try:
+                response = client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": self.SYSTEM_PROMPT},
+                        {"role": "user", "content": email_content}
+                    ],
+                    temperature=0.1,  # Low temperature for consistent extraction
+                    max_tokens=1000,
+                    response_format={"type": "json_object"}
+                )
+                
+                result = json.loads(response.choices[0].message.content)
+                # Always inject thread_id from email data (AI may not return it)
+                result['thread_id'] = thread_id
+                return TaskData(**result)
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                if "429" in str(e) or "rate_limit" in error_str:
+                    print(f"[EmailParserAgent] Groq key {i+1}/{len(self.groq_clients)} rate limited")
+                    # If it's the last key, wait and retry the first key once
+                    if i == len(self.groq_clients) - 1:
+                        print(f"[EmailParserAgent] All keys rate limited, waiting 15s before retry...")
+                        _time.sleep(15)
+                        try:
+                            response = self.groq_clients[0].chat.completions.create(
+                                model=self.model,
+                                messages=[
+                                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                                    {"role": "user", "content": email_content}
+                                ],
+                                temperature=0.1,
+                                max_tokens=1000,
+                                response_format={"type": "json_object"}
+                            )
+                            result = json.loads(response.choices[0].message.content)
+                            result['thread_id'] = thread_id
+                            return TaskData(**result)
+                        except Exception as retry_e:
+                            print(f"[EmailParserAgent] Retry after wait also failed: {retry_e}")
+                    continue
+                else:
+                    print(f"[EmailParserAgent] Groq error (key {i+1}): {e}")
+                    continue
         
-        Args:
-            email_content: Formatted email content
-            email_data: Original email data dictionary
-            
-        Returns:
-            TaskData object with extracted fields
-        """
-        prompt = f"""{self.SYSTEM_PROMPT}
-
-{email_content}"""
-        
-        response = self.gemini_model.generate_content(prompt)
-        result_text = response.text
-        
-        # Extract JSON from response (Gemini might wrap it in markdown)
-        if "```json" in result_text:
-            result_text = result_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in result_text:
-            result_text = result_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(result_text)
-        return TaskData(**result)
+        # All Groq keys failed, use basic fallback
+        print(f"[EmailParserAgent] All Groq keys failed, using fallback parser")
+        return self._fallback_parse(email_data)
     
     def _format_email_for_parsing(self, email_data: dict) -> str:
         """Format email data into a prompt for the LLM."""
-        return f"""Parse this email for the product engineering team:
+        # Limit body to 2000 chars to save tokens and avoid rate limits
+        body = email_data.get('body', 'No content')
+        if len(body) > 2000:
+            body = body[:2000] + "\n...[truncated]"
+        
+        return f"""Parse this email:
 
-THREAD ID: {email_data.get('thread_id', 'unknown')}
 SUBJECT: {email_data.get('subject', 'No Subject')}
 FROM: {email_data.get('from', 'Unknown')}
 TO: {email_data.get('to', 'Unknown')}
@@ -187,26 +211,30 @@ DATE SENT: {email_data.get('date_sent', datetime.now().strftime('%Y-%m-%d'))}
 DATE RECEIVED: {email_data.get('date_received', datetime.now().strftime('%Y-%m-%d'))}
 
 BODY:
-{email_data.get('body', 'No content')}
+{body}
 
 ---
-Extract all the email information as JSON. This is an incoming email, so reply_status should be "No Reply", reply_count should be 0, and reply fields should be empty."""
+Extract the email information as JSON. reply_status="No Reply", reply fields empty."""
 
     def _fallback_parse(self, email_data: dict) -> TaskData:
         """Fallback parsing when LLM fails - uses basic extraction."""
         sender_email = email_data.get('from', 'unknown@unknown.com')
         date_str = email_data.get('date_sent', email_data.get('date', datetime.now().strftime('%Y-%m-%d')))
+        subject = email_data.get('subject', 'No Subject')
+        
+        # Create a clean summary from subject (don't dump raw email body)
+        summary = f"Email regarding: {subject}"
         
         return TaskData(
             thread_id=email_data.get('thread_id', 'unknown'),
-            email_subject=email_data.get('subject', 'No Subject'),
+            email_subject=subject,
             sender_name=sender_email.split('<')[0].strip() if '<' in sender_email else sender_email,
             sender_email=sender_email,
             date_sent=date_str,
             date_received=date_str,
-            task_name=email_data.get('subject', 'Email Task')[:50],
-            email_summary=email_data.get('body', '')[:200],
-            team_origin="Unknown",
+            task_name=subject[:50],
+            email_summary=summary,
+            team_origin="Other",
             reply_status="No Reply",
             replied_by="",
             reply_date="",

@@ -10,13 +10,13 @@ load_dotenv()
 class Config:
     """Application configuration loaded from environment variables."""
     
-    # Groq Configuration
-    GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-    
-    # Google Gemini Configuration (Fallback)
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    # Groq Configuration (multiple keys for fallback)
+    GROQ_API_KEYS: list = [
+        key.strip() for key in os.getenv("GROQ_API_KEYS", os.getenv("GROQ_API_KEY", "")).split(",")
+        if key.strip()
+    ]
+    GROQ_API_KEY: str = GROQ_API_KEYS[0] if GROQ_API_KEYS else ""  # Backward compatibility
+    GROQ_MODEL: str = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     
     # Google Sheets Configuration
     GOOGLE_SHEET_ID: str = os.getenv("GOOGLE_SHEET_ID", "")

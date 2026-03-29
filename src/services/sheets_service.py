@@ -244,6 +244,38 @@ class GoogleSheetsService:
                 }
             })
             
+            # Add data validation for Team Origin column (I)
+            requests.append({
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": self.sheet.id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 1000,
+                        "startColumnIndex": 8,  # Column I (Team Origin)
+                        "endColumnIndex": 9
+                    },
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [
+                                {"userEnteredValue": "Product Ops"},
+                                {"userEnteredValue": "Sales"},
+                                {"userEnteredValue": "Supply Chain & Logistics"},
+                                {"userEnteredValue": "Engineering"},
+                                {"userEnteredValue": "Finance"},
+                                {"userEnteredValue": "Marketing"},
+                                {"userEnteredValue": "Support"},
+                                {"userEnteredValue": "HR"},
+                                {"userEnteredValue": "Legal"},
+                                {"userEnteredValue": "Other"}
+                            ]
+                        },
+                        "showCustomUi": True,
+                        "strict": False
+                    }
+                }
+            })
+            
             # Add data validation for Task Status column (N)
             requests.append({
                 "setDataValidation": {
@@ -334,6 +366,133 @@ class GoogleSheetsService:
                         }
                     },
                     "index": 1
+                }
+            })
+            
+            # Conditional formatting: Task Status column (N)
+            # Pending - Orange
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 13,  # Column N
+                            "endColumnIndex": 14
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "Pending"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 1.0, "green": 0.90, "blue": 0.70},
+                                "textFormat": {"foregroundColor": {"red": 0.80, "green": 0.52, "blue": 0.0}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 2
+                }
+            })
+            # In Progress - Blue
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 13,  # Column N
+                            "endColumnIndex": 14
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "In Progress"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.80, "green": 0.88, "blue": 1.0},
+                                "textFormat": {"foregroundColor": {"red": 0.10, "green": 0.33, "blue": 0.80}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 3
+                }
+            })
+            # Completed - Green
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 13,  # Column N
+                            "endColumnIndex": 14
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "Completed"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.80, "green": 0.94, "blue": 0.80},
+                                "textFormat": {"foregroundColor": {"red": 0.13, "green": 0.55, "blue": 0.13}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 4
+                }
+            })
+            # On Hold - Purple
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 13,  # Column N
+                            "endColumnIndex": 14
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "On Hold"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.90, "green": 0.82, "blue": 0.96},
+                                "textFormat": {"foregroundColor": {"red": 0.50, "green": 0.20, "blue": 0.70}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 5
+                }
+            })
+            # Cancelled - Gray
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 13,  # Column N
+                            "endColumnIndex": 14
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "Cancelled"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.90, "green": 0.90, "blue": 0.90},
+                                "textFormat": {"foregroundColor": {"red": 0.50, "green": 0.50, "blue": 0.50}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 6
                 }
             })
             
@@ -477,8 +636,13 @@ class GoogleSheetsService:
                     'range': f'M{row_num}',
                     'values': [[reply_data['reply_summary']]]
                 })
-            
-            # Batch update
+                        # Column N (14): Task Status
+            if 'task_status' in reply_data:
+                updates.append({
+                    'range': f'N{row_num}',
+                    'values': [[reply_data['task_status']]]
+                })
+                        # Batch update
             self.sheet.batch_update(updates)
             
             print(f"[SheetsService] Updated thread {thread_id} at row {row_num}")
