@@ -29,9 +29,9 @@ class GoogleSheetsService:
         "Sender Name",
         "Sender Email",
         "Date Sent",
-        "Task Name",
         "Email Summary",
         "Team Origin",
+        "Origin Type",
         "Reply Status",
         "Replied By",
         "Reply Date",
@@ -94,7 +94,7 @@ class GoogleSheetsService:
                 self.sheet.update([self.HEADERS], 'A1:N1')
             
             # Always apply header formatting
-            self.sheet.format('A1:N1', {
+            self.sheet.format('A1:O1', {
                 'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},  # Professional blue
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
                 'horizontalAlignment': 'CENTER',
@@ -115,7 +115,7 @@ class GoogleSheetsService:
                                     "startRowIndex": 0,
                                     "endRowIndex": 1000,  # Cover up to 1000 rows
                                     "startColumnIndex": 0,
-                                    "endColumnIndex": 14   # All 14 columns (A-N)
+                                    "endColumnIndex": 15   # All 15 columns (A-O)
                                 }
                             }
                         }
@@ -135,13 +135,13 @@ class GoogleSheetsService:
             column_widths = [
                 ("A", 60),   # SN
                 ("B", 150),  # Thread ID
-                ("C", 250),  # Email Subject
+                ("C", 300),  # Email Subject (wider since no Task Name)
                 ("D", 150),  # Sender Name
                 ("E", 200),  # Sender Email
                 ("F", 130),  # Date Sent
-                ("G", 200),  # Task Name
-                ("H", 300),  # Email Summary
-                ("I", 120),  # Team Origin
+                ("G", 300),  # Email Summary
+                ("H", 120),  # Team Origin
+                ("I", 100),  # Origin Type
                 ("J", 100),  # Reply Status
                 ("K", 250),  # Replied By
                 ("L", 130),  # Reply Date
@@ -210,7 +210,7 @@ class GoogleSheetsService:
                             "startRowIndex": 1,  # Skip header
                             "endRowIndex": 1000,
                             "startColumnIndex": 0,
-                            "endColumnIndex": 14
+                            "endColumnIndex": 15
                         },
                         "rowProperties": {
                             "firstBandColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
@@ -244,15 +244,15 @@ class GoogleSheetsService:
                 }
             })
             
-            # Add data validation for Team Origin column (I)
+            # Add data validation for Team Origin column (H)
             requests.append({
                 "setDataValidation": {
                     "range": {
                         "sheetId": self.sheet.id,
                         "startRowIndex": 1,
                         "endRowIndex": 1000,
-                        "startColumnIndex": 8,  # Column I (Team Origin)
-                        "endColumnIndex": 9
+                        "startColumnIndex": 7,  # Column H (Team Origin)
+                        "endColumnIndex": 8
                     },
                     "rule": {
                         "condition": {
@@ -268,6 +268,30 @@ class GoogleSheetsService:
                                 {"userEnteredValue": "HR"},
                                 {"userEnteredValue": "Legal"},
                                 {"userEnteredValue": "Other"}
+                            ]
+                        },
+                        "showCustomUi": True,
+                        "strict": False
+                    }
+                }
+            })
+            
+            # Add data validation for Origin Type column (I)
+            requests.append({
+                "setDataValidation": {
+                    "range": {
+                        "sheetId": self.sheet.id,
+                        "startRowIndex": 1,
+                        "endRowIndex": 1000,
+                        "startColumnIndex": 8,  # Column I (Origin Type)
+                        "endColumnIndex": 9
+                    },
+                    "rule": {
+                        "condition": {
+                            "type": "ONE_OF_LIST",
+                            "values": [
+                                {"userEnteredValue": "Internal"},
+                                {"userEnteredValue": "External"}
                             ]
                         },
                         "showCustomUi": True,
@@ -319,6 +343,79 @@ class GoogleSheetsService:
             except Exception:
                 pass  # No existing rules to clear
 
+            # Clear data validation from text-only columns (Email Summary, Replied By, Reply Date, etc.)
+            # These should NOT have dropdowns
+            text_only_columns = [
+                (6, 7),   # Column G: Email Summary
+                (10, 11), # Column K: Replied By
+                (11, 12), # Column L: Reply Date
+                (12, 13), # Column M: Reply Summary
+            ]
+            
+            for start_col, end_col in text_only_columns:
+                requests.append({
+                    "setDataValidation": {
+                        "range": {
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": start_col,
+                            "endColumnIndex": end_col
+                        },
+                        "rule": None  # Remove validation
+                    }
+                })
+
+            # Conditional formatting: Origin Type (Column I) - Blue for "Internal", Green for "External"
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 8,  # Column I
+                            "endColumnIndex": 9
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "Internal"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.85, "green": 0.92, "blue": 1.0},
+                                "textFormat": {"foregroundColor": {"red": 0.13, "green": 0.40, "blue": 0.80}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 0
+                }
+            })
+            requests.append({
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": 1,
+                            "endRowIndex": 1000,
+                            "startColumnIndex": 8,  # Column I
+                            "endColumnIndex": 9
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "TEXT_EQ",
+                                "values": [{"userEnteredValue": "External"}]
+                            },
+                            "format": {
+                                "backgroundColor": {"red": 0.88, "green": 0.96, "blue": 0.88},
+                                "textFormat": {"foregroundColor": {"red": 0.20, "green": 0.60, "blue": 0.20}, "bold": True}
+                            }
+                        }
+                    },
+                    "index": 1
+                }
+            })
+            
             # Conditional formatting: Reply Status (Column J) - Red for "No Reply", Green for "Replied"
             requests.append({
                 "addConditionalFormatRule": {
@@ -341,7 +438,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 0
+                    "index": 2
                 }
             })
             requests.append({
@@ -365,7 +462,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 1
+                    "index": 3
                 }
             })
             
@@ -392,7 +489,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 2
+                    "index": 4
                 }
             })
             # In Progress - Blue
@@ -417,7 +514,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 3
+                    "index": 5
                 }
             })
             # Completed - Green
@@ -442,7 +539,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 4
+                    "index": 6
                 }
             })
             # On Hold - Purple
@@ -467,7 +564,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 5
+                    "index": 7
                 }
             })
             # Cancelled - Gray
@@ -492,7 +589,7 @@ class GoogleSheetsService:
                             }
                         }
                     },
-                    "index": 6
+                    "index": 8
                 }
             })
             
@@ -546,9 +643,9 @@ class GoogleSheetsService:
                 task.sender_name,
                 task.sender_email,
                 task.date_sent,
-                task.task_name,
                 task.email_summary,
                 task.team_origin,
+                task.origin_type,
                 task.reply_status,
                 task.replied_by,
                 task.reply_date,
@@ -558,7 +655,7 @@ class GoogleSheetsService:
             
             self.sheet.append_row(row, value_input_option='USER_ENTERED')
             
-            print(f"[SheetsService] Added task SN#{sn}: {task.task_name}")
+            print(f"[SheetsService] Added task SN#{sn}: {task.email_subject[:50]}...")
             return True
             
         except Exception as e:
@@ -607,7 +704,7 @@ class GoogleSheetsService:
                 print(f"[SheetsService] Thread {thread_id} not found")
                 return False
             
-            # Update columns: J=Reply Status, K=Replied By, L=Reply Date, M=Reply Summary
+            # Update columns: J=Reply Status, K=Replied By, L=Reply Date, M=Reply Summary, N=Task Status
             updates = []
             
             # Column J (10): Reply Status
@@ -636,7 +733,8 @@ class GoogleSheetsService:
                     'range': f'M{row_num}',
                     'values': [[reply_data['reply_summary']]]
                 })
-                        # Column N (14): Task Status
+            
+            # Column N (14): Task Status
             if 'task_status' in reply_data:
                 updates.append({
                     'range': f'N{row_num}',
@@ -702,13 +800,19 @@ class GoogleSheetsService:
         for i, task in enumerate(tasks):
             rows.append([
                 str(start_sn + i),
-                task.task_name,
-                task.description,
-                task.status,
-                task.date_of_query,
-                task.date_of_solution,
-                task.request_came_from,
-                task.team_origin
+                task.thread_id,
+                task.email_subject,
+                task.sender_name,
+                task.sender_email,
+                task.date_sent,
+                task.email_summary,
+                task.team_origin,
+                task.origin_type,
+                task.reply_status,
+                task.replied_by,
+                task.reply_date,
+                task.reply_summary,
+                task.status
             ])
         
         try:

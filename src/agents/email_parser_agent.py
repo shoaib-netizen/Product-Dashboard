@@ -28,9 +28,9 @@ class TaskData(BaseModel):
     date_received: str = Field(description="Date email was received (YYYY-MM-DD)")
     
     # Task Information
-    task_name: str = Field(description="Brief name/title of the task")
     email_summary: str = Field(description="Short summary of email body (2-3 sentences)")
     team_origin: str = Field(description="Team/department where request originated")
+    origin_type: str = Field(default="External", description="Internal or External origin")
 
     @field_validator('team_origin')
     @classmethod
@@ -68,10 +68,9 @@ Extract these fields:
 3. sender_name: Sender's full name (extract from email if available)
 4. sender_email: Sender's email address
 5. date_sent: Date sent (YYYY-MM-DD format)
-7. date_received: Date/time received (YYYY-MM-DD HH:MM format)
-8. task_name: Brief, clear title for the task/request (max 50 chars)
-9. email_summary: 2-3 sentence summary of the email body
-10. team_origin: The team/department where the email request originated. Use one of these categories:
+6. date_received: Date/time received (YYYY-MM-DD HH:MM format)
+7. email_summary: 2-3 sentence summary of the email body
+8. team_origin: The team/department where the email request originated. Use one of these categories:
     - "Product Ops" — Internal product operations, customer response management, product queries, coordination
     - "Sales" — Sales inquiries, deals, pricing, proposals, partnerships, business development
     - "Supply Chain & Logistics" — Shipping, inventory, warehousing, procurement, delivery, fulfillment, freight
@@ -83,17 +82,16 @@ Extract these fields:
     - "Legal" — Contracts, compliance, terms, NDAs
     - "Other" — If none of the above clearly fits
     Classify based on email content, sender's role/department, domain, and context. When in doubt, prefer the most specific match.
-11. reply_status: "No Reply" (default for initial emails)
-12. replied_by: "" (empty for initial emails)
-13. reply_date: "" (empty for initial emails)
-14. reply_summary: "" (empty for initial emails)
-15. status: "Pending" (default task status)
-16. date_of_solution: "" (empty if not resolved)
+9. reply_status: "No Reply" (default for initial emails)
+10. replied_by: "" (empty for initial emails)
+11. reply_date: "" (empty for initial emails)
+12. reply_summary: "" (empty for initial emails)
+13. status: "Pending" (default task status)
+14. date_of_solution: "" (empty if not resolved)
 
 Be intelligent:
 - Extract sender name from "From" field or email signature
 - Infer team from email content, sender's role, domain, signature, or context
-- Create concise, actionable task names
 - Summarize the core request clearly
 
 Respond ONLY with valid JSON matching this structure:
@@ -103,7 +101,6 @@ Respond ONLY with valid JSON matching this structure:
     "sender_email": "email@domain.com",
     "date_sent": "YYYY-MM-DD",
     "date_received": "YYYY-MM-DD HH:MM",
-    "task_name": "string",
     "email_summary": "string",
     "team_origin": "string",
     "reply_status": "No Reply",
@@ -232,7 +229,6 @@ Extract the email information as JSON. reply_status="No Reply", reply fields emp
             sender_email=sender_email,
             date_sent=date_str,
             date_received=date_str,
-            task_name=subject[:50],
             email_summary=summary,
             team_origin="Other",
             reply_status="No Reply",
