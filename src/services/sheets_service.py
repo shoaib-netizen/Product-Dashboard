@@ -45,6 +45,7 @@ class GoogleSheetsService:
         self.client = gspread.authorize(self.creds)
         self.sheet = self._get_sheet()
         self._ensure_headers()
+        self._format_as_table()   # <-- important
     
     def _authenticate(self) -> Credentials:
         """Authenticate with Google Sheets using service account."""
@@ -82,7 +83,7 @@ class GoogleSheetsService:
             return spreadsheet.add_worksheet(
                 title=Config.GOOGLE_SHEET_NAME,
                 rows=1000,
-                cols=10
+                cols=14
             )
     
     def _ensure_headers(self):
@@ -94,7 +95,7 @@ class GoogleSheetsService:
                 self.sheet.update([self.HEADERS], 'A1:N1')
             
             # Always apply header formatting
-            self.sheet.format('A1:O1', {
+            self.sheet.format('A1:N1', {
                 'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},  # Professional blue
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
                 'horizontalAlignment': 'CENTER',
@@ -115,7 +116,7 @@ class GoogleSheetsService:
                                     "startRowIndex": 0,
                                     "endRowIndex": 1000,  # Cover up to 1000 rows
                                     "startColumnIndex": 0,
-                                    "endColumnIndex": 15   # All 15 columns (A-O)
+                                    "endColumnIndex": 14   # All 14 columns (A-N)
                                 }
                             }
                         }
@@ -210,7 +211,7 @@ class GoogleSheetsService:
                             "startRowIndex": 1,  # Skip header
                             "endRowIndex": 1000,
                             "startColumnIndex": 0,
-                            "endColumnIndex": 15
+                            "endColumnIndex": 14
                         },
                         "rowProperties": {
                             "firstBandColor": {"red": 1.0, "green": 1.0, "blue": 1.0},
