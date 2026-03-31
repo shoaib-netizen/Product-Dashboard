@@ -60,26 +60,17 @@ class EmailToSheetsAgent:
             email_address = email_address.split('<')[1].split('>')[0].strip()
         return email_address.lower().strip() in Config.INTERNAL_TEAM_EMAILS
     
-    def _should_skip_email(self, email: dict, is_reply: bool, thread_exists: bool) -> tuple[bool, str]:
+    def _determine_origin_type(self, email_address: str) -> str:
         """
-        Determine if an email should be skipped based on internal team filtering.
+        Determine if conversation origin is Internal or External.
         
+        Args:
+            email_address: Original sender's email address
+            
         Returns:
-            Tuple of (should_skip: bool, reason: str)
+            "Internal" if sender is in INTERNAL_TEAM_EMAILS, "External" otherwise
         """
-        sender = email.get('from', '')
-        
-        # Always process if it's a reply to an existing thread
-        if is_reply and thread_exists:
-            return False, ""
-        
-        # For new threads: skip if internal team is initiating
-        if self._is_internal_sender(sender):
-            if not is_reply:
-                return True, f"Internal sender initiated thread: {sender}"
-            return False, ""
-        
-        return False, ""
+        return "Internal" if self._is_internal_sender(email_address) else "External"
     
     def _determine_task_status(self, thread_messages: list) -> str:
         """
@@ -156,13 +147,6 @@ class EmailToSheetsAgent:
                 
                 # Determine if this is a reply (subject starts with Re: or thread exists)
                 is_reply = subject.startswith('Re:') or subject.startswith('回复：')
-                
-                # Check if we should skip this email (internal team initiated)
-                should_skip, skip_reason = self._should_skip_email(email, is_reply, existing_row is not None)
-                if should_skip:
-                    logger.info(f"  → Skipping: {skip_reason}")
-                    self.gmail.mark_as_read(email['message_id'])
-                    continue
                 
                 # Check if we already processed this thread in this session (prevent duplicates)
                 if thread_id in self.processed_threads:
@@ -277,14 +261,13 @@ class EmailToSheetsAgent:
                         original_sender = original_email.get('from', '')
                         logger.info(f"  → Found {len(thread_messages)} messages in thread")
                         
-                        # Check if original sender is internal - if so, skip entire thread
-                        if self._is_internal_sender(original_sender):
-                            logger.info(f"  → Skipping thread: initiated by internal team member {original_sender}")
-                            self.gmail.mark_as_read(email['message_id'])
-                            continue
-                        
                         # Parse the original email
                         original_task = self.parser.parse_email(original_email)
+                        
+                        # Set origin type based on original sender
+                        if original_task:
+                            original_task.origin_type = self._determine_origin_type(original_sender)
+                            logger.info(f"  → Origin Type: {original_task.origin_type}")
                         
                         if original_task:
                             # If there are replies (more than 1 message), update task with reply info BEFORE adding
@@ -331,7 +314,7 @@ class EmailToSheetsAgent:
                             
                             # Add the task with all data included
                             if self.sheets.add_task(original_task):
-                                logger.info(f"  ✓ Added original: {original_task.task_name}")
+                                logger.info(f"  ✓ Added original: {original_task.email_subject[:50]}...")
                                 # Mark the current email as read
                                 self.gmail.mark_as_read(email['message_id'])
                                 processed_count += 1
@@ -352,15 +335,14 @@ class EmailToSheetsAgent:
                     if thread_messages and len(thread_messages) > 0:
                         # Use the first message (original) for parsing
                         original_email_msg = thread_messages[0]
-                        
-                        # Check if original sender is internal - skip entire thread
                         orig_sender = original_email_msg.get('from', '')
-                        if self._is_internal_sender(orig_sender):
-                            logger.info(f"  → Skipping thread: initiated by internal team member {orig_sender}")
-                            self.gmail.mark_as_read(email['message_id'])
-                            continue
                         
                         task_data = self.parser.parse_email(original_email_msg)
+                        
+                        # Set origin type based on original sender
+                        if task_data:
+                            task_data.origin_type = self._determine_origin_type(orig_sender)
+                            logger.info(f"  → Origin Type: {task_data.origin_type}")
                         
                         if task_data:
                             # Check if thread has replies
@@ -404,7 +386,7 @@ class EmailToSheetsAgent:
                             if self.sheets.add_task(task_data):
                                 self.gmail.mark_as_read(email['message_id'])
                                 processed_count += 1
-                                logger.info(f"  ✓ Added: {task_data.task_name}")
+                                logger.info(f"  ✓ Added: {task_data.email_subject[:50]}...")
                             else:
                                 logger.warning(f"  ✗ Failed to add to sheets")
                         else:
@@ -520,7 +502,7 @@ class EmailToSheetsAgent:
                         
                         # Add the task with all data included
                         if self.sheets.add_task(original_task):
-                            logger.info(f"  ✓ Added: {original_task.task_name}")
+                            logger.info(f"  ✓ Added: {original_task.email_subject[:50]}...")
                             processed_count += 1
                             processed_threads.add(thread_id)
                         else:
