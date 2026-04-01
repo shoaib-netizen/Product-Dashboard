@@ -614,13 +614,17 @@ class GoogleSheetsService:
         except Exception as e:
             print(f"[SheetsService] Error clearing sheet: {e}")
 
+    # NEW — PASTE THIS
     def _get_next_sn(self) -> int:
-        """Get the next serial number."""
+        """Get the next serial number based on row count.
+        Row count is always accurate even under rapid appends,
+        unlike max+1 which suffers from Google Sheets API cache lag.
+        """
         try:
             all_values = self.sheet.col_values(1)  # Get SN column
-            # Filter out header and empty values
-            numbers = [int(v) for v in all_values[1:] if v.isdigit()]
-            return max(numbers, default=0) + 1
+            # Count non-empty data rows (skip header row)
+            data_rows = [v for v in all_values[1:] if v.strip() != '']
+            return len(data_rows) + 1
         except:
             return 1
     

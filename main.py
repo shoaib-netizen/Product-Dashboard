@@ -113,291 +113,169 @@ class EmailToSheetsAgent:
             # Only external replies, no internal response yet
             return "Pending"
     
+    # NEW — PASTE THIS
     def process_emails(self) -> int:
         """
         Process emails and store in Google Sheets.
         Fetches ALL matching emails (no limit).
-        
+
         Returns:
             Number of emails processed
         """
         logger.info("Checking for new emails...")
-        
+
         # Fetch ALL recent emails (read or unread) - will skip those already in sheet
         # If INITIAL_IMPORT=true: fetches ALL from Jan 1, 2026
         # If INITIAL_IMPORT=false: fetches ALL from last 7 days
         emails = self.gmail.fetch_recent_emails()
-        
+
         if not emails:
             logger.info("No new emails found")
             return 0
-        
+
         logger.info(f"Found {len(emails)} new email(s)")
-        
-        # Process each email
-        processed_count = 0
+
+        # Pre-load all existing thread IDs from sheet ONCE upfront
+        # This avoids one separate Google Sheets API call per email
+        try:
+            existing_thread_ids = set(tid for tid in self.sheets.sheet.col_values(2)[1:] if tid)
+        except Exception:
+            existing_thread_ids = set()
+
+        # Deduplicate by thread_id BEFORE processing anything
+        # Gmail returns one message ID per email in a thread, so a thread with
+        # 9 replies comes back as 10 separate entries in the list.
+        # We collapse these to one entry per thread (the first/oldest message)
+        # so each thread is only processed once.
+        seen_thread_ids_dedup = set()
+        unique_emails = []
         for email in emails:
+            tid = email.get('thread_id', '')
+            if not tid:
+                unique_emails.append(email)
+                continue
+            if tid not in seen_thread_ids_dedup:
+                seen_thread_ids_dedup.add(tid)
+                unique_emails.append(email)
+
+        logger.info(f"Unique threads to process: {len(unique_emails)} (from {len(emails)} messages)")
+
+        # Process each unique thread
+        processed_count = 0
+        for email in unique_emails:
             try:
                 subject = email.get('subject', 'No Subject')
                 thread_id = email.get('thread_id', '')
                 logger.info(f"Processing: {subject[:50]}...")
-                
-                # Check if this thread already exists in the sheet
-                existing_row = self.sheets.find_thread_row(thread_id) if thread_id else None
-                
-                # Determine if this is a reply (subject starts with Re: or thread exists)
-                is_reply = subject.startswith('Re:') or subject.startswith('回复：')
-                
-                # Check if we already processed this thread in this session (prevent duplicates)
-                if thread_id in self.processed_threads:
+
+                # Skip if already processed in this session
+                if thread_id and thread_id in self.processed_threads:
                     logger.info(f"  → Skipping: already processed this thread in this session")
-                    self.gmail.mark_as_read(email['message_id'])
                     continue
-                
+
+                # Skip if thread already exists in the sheet
+                if thread_id and thread_id in existing_thread_ids:
+                    logger.info(f"  → Skipping: thread already in sheet")
+                    if email.get('message_id'):
+                        self.gmail.mark_as_read(email['message_id'])
+                    continue
+
                 # Mark thread as processed IMMEDIATELY to prevent duplicates
                 # even if an error occurs mid-processing
                 if thread_id:
                     self.processed_threads.add(thread_id)
-                
-                if is_reply and existing_row:
-                    # This is a reply to an existing thread - update the row
-                    logger.info(f"  → Reply detected for existing thread")
-                    
-                    # Parse the reply with AI to get summary
-                    reply_task = self.parser.parse_email(email)
-                    
-                    # Get original sender to exclude from responders list
-                    original_sender = ""
-                    try:
-                        original_sender = self.sheets.sheet.cell(existing_row, 5).value or ""  # Column E (Sender Email)
-                    except:
-                        pass
-                    
-                    # Get current replied_by list and build unique responders list
-                    current_replied_by = ""
-                    try:
-                        current_replied_by = self.sheets.sheet.cell(existing_row, 11).value or ""  # Column K (Replied By)
-                    except:
-                        pass
-                    
-                    # Format new responder
-                    new_responder = email.get('from', 'Unknown')
-                    
-                    # Extract email address for comparison (handles "Name <email@domain.com>" format)
-                    def extract_email(responder_str):
-                        if '<' in responder_str and '>' in responder_str:
-                            return responder_str.split('<')[1].split('>')[0].strip().lower()
-                        return responder_str.strip().lower()
-                    
-                    # Extract just the name from "Name <email@domain.com>" format
-                    def extract_name(responder_str):
-                        if '<' in responder_str:
-                            name = responder_str.split('<')[0].strip().strip('"').strip("'")
-                            if name:
-                                return name
-                        return responder_str.strip()
-                    
-                    new_email = extract_email(new_responder)
-                    original_email = extract_email(original_sender)
-                    new_name = extract_name(new_responder)
-                    
-                    # Build unique responders list (exclude original sender)
-                    responders_set = set()
-                    responders_list = []
-                    
-                    # Add existing responders
-                    if current_replied_by:
-                        for resp in current_replied_by.split(';'):
-                            resp = resp.strip()
-                            if resp:
-                                resp_lower = resp.lower()
-                                if resp_lower not in responders_set:
-                                    responders_set.add(resp_lower)
-                                    responders_list.append(resp)
-                    
-                    # Add new responder name if not original sender and not duplicate
-                    if new_email != original_email and new_name.lower() not in responders_set:
-                        responders_set.add(new_name.lower())
-                        responders_list.append(new_name)
-                    
-                    # Skip update if the only "responder" is the original sender (email to self)
-                    if not responders_list and new_email == original_email:
-                        logger.info(f"  → Skipping: reply from original sender (email to self)")
-                        self.gmail.mark_as_read(email['message_id'])
-                        continue
-                    
-                    replied_by_list = "; ".join(responders_list) if responders_list else new_name
-                    
-                    # Determine task status based on who is replying
-                    task_status = "In Progress" if self._is_internal_sender(new_email) else "In Progress"
-                    
-                    # Update the thread with reply information
-                    reply_data = {
-                        'replied_by': replied_by_list,
-                        'reply_date': reply_task.date_sent if reply_task else email.get('date_sent', ''),
-                        'reply_summary': reply_task.email_summary if reply_task else '',
-                        'task_status': task_status
-                    }
-                    
-                    if self.sheets.update_thread_reply(thread_id, reply_data):
-                        self.gmail.mark_as_read(email['message_id'])
-                        processed_count += 1
-                        logger.info(f"  ✓ Updated thread with reply from {new_responder}")
-                        logger.info(f"  → All responders: {replied_by_list}")
-                        logger.info(f"  → Task status: {task_status}")
-                    else:
-                        logger.warning(f"  ✗ Failed to update thread")
-                        
-                elif is_reply and not existing_row and thread_id:
-                    # Reply detected but original thread not in sheet - fetch full thread
-                    logger.info(f"  → Reply detected, fetching full thread...")
-                    
-                    # Fetch all messages in the thread
+
+                # Fetch full thread to get complete conversation including all replies
+                if thread_id:
                     thread_messages = self.gmail.fetch_thread_messages(thread_id)
-                    
-                    if thread_messages and len(thread_messages) > 0:
-                        # First message is the original email
-                        original_email = thread_messages[0]
-                        original_sender = original_email.get('from', '')
-                        logger.info(f"  → Found {len(thread_messages)} messages in thread")
-                        
-                        # Parse the original email
-                        original_task = self.parser.parse_email(original_email)
-                        
-                        # Set origin type based on original sender
-                        if original_task:
-                            original_task.origin_type = self._determine_origin_type(original_sender)
-                            logger.info(f"  → Origin Type: {original_task.origin_type}")
-                        
-                        if original_task:
-                            # If there are replies (more than 1 message), update task with reply info BEFORE adding
-                            if len(thread_messages) > 1:
-                                latest_reply = thread_messages[-1]  # Last message is latest reply
-                                reply_task = self.parser.parse_email(latest_reply)
-                                
-                                # Collect all unique responder names from the thread (skip original sender)
-                                original_from = original_email.get('from', '')
-                                original_from_email = original_from.split('<')[1].split('>')[0].strip().lower() if '<' in original_from else original_from.strip().lower()
-                                responder_names = []
-                                seen_names = set()
-                                
-                                for msg in thread_messages[1:]:  # Skip first message (original)
-                                    responder = msg.get('from', 'Unknown')
-                                    # Extract email for comparison
-                                    resp_email = responder.split('<')[1].split('>')[0].strip().lower() if '<' in responder else responder.strip().lower()
-                                    # Extract just the name
-                                    resp_name = responder.split('<')[0].strip().strip('"').strip("'") if '<' in responder else responder.strip()
-                                    
-                                    if resp_email != original_from_email and resp_name.lower() not in seen_names and resp_name:
-                                        responder_names.append(resp_name)
-                                        seen_names.add(resp_name.lower())
-                                
-                                latest_from = latest_reply.get('from', 'Unknown')
-                                latest_name = latest_from.split('<')[0].strip().strip('"').strip("'") if '<' in latest_from else latest_from.strip()
-                                replied_by_list = "; ".join(responder_names) if responder_names else latest_name
-                                
-                                # Only mark as replied if there are actual responders (not just original sender)
-                                if responder_names:
-                                    # Update task object with reply info
-                                    original_task.reply_status = "Replied"
-                                    original_task.replied_by = replied_by_list
-                                    original_task.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
-                                    original_task.reply_summary = reply_task.email_summary if reply_task else ''
-                                    
-                                    # Determine task status based on who replied
-                                    original_task.status = self._determine_task_status(thread_messages)
-                                     
-                                    logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
-                                    logger.info(f"  → Task status: {original_task.status}")
-                                else:
-                                    logger.info(f"  → Thread has {len(thread_messages) - 1} message(s) but only from original sender")
-                            
-                            # Add the task with all data included
-                            if self.sheets.add_task(original_task):
-                                logger.info(f"  ✓ Added original: {original_task.email_subject[:50]}...")
-                                # Mark the current email as read
-                                self.gmail.mark_as_read(email['message_id'])
-                                processed_count += 1
-                            else:
-                                logger.warning(f"  ✗ Failed to add original email")
-                        else:
-                            logger.warning(f"  ✗ Failed to parse original email")
-                    else:
-                        logger.warning(f"  ✗ Could not fetch thread messages")
-                elif existing_row:
-                    # Thread already in sheet and this is not a reply - skip
-                    logger.info(f"  → Skipping: thread already in sheet")
-                    continue
                 else:
-                    # New thread - fetch full thread to check for any replies
-                    thread_messages = self.gmail.fetch_thread_messages(thread_id) if thread_id else [email]
-                    
-                    if thread_messages and len(thread_messages) > 0:
-                        # Use the first message (original) for parsing
-                        original_email_msg = thread_messages[0]
-                        orig_sender = original_email_msg.get('from', '')
-                        
-                        task_data = self.parser.parse_email(original_email_msg)
-                        
-                        # Set origin type based on original sender
-                        if task_data:
-                            task_data.origin_type = self._determine_origin_type(orig_sender)
-                            logger.info(f"  → Origin Type: {task_data.origin_type}")
-                        
-                        if task_data:
-                            # Check if thread has replies
-                            if len(thread_messages) > 1:
-                                latest_reply = thread_messages[-1]
-                                reply_task = self.parser.parse_email(latest_reply)
-                                
-                                # Collect unique responder names (exclude original sender)
-                                original_from = original_email_msg.get('from', '')
-                                original_from_email = original_from.split('<')[1].split('>')[0].strip().lower() if '<' in original_from else original_from.strip().lower()
-                                responder_names = []
-                                seen_names = set()
-                                
-                                for msg in thread_messages[1:]:
-                                    responder = msg.get('from', 'Unknown')
-                                    resp_email = responder.split('<')[1].split('>')[0].strip().lower() if '<' in responder else responder.strip().lower()
-                                    resp_name = responder.split('<')[0].strip().strip('"').strip("'") if '<' in responder else responder.strip()
-                                    
-                                    if resp_email != original_from_email and resp_name.lower() not in seen_names and resp_name:
-                                        responder_names.append(resp_name)
-                                        seen_names.add(resp_name.lower())
-                                
-                                latest_from = latest_reply.get('from', 'Unknown')
-                                latest_name = latest_from.split('<')[0].strip().strip('"').strip("'") if '<' in latest_from else latest_from.strip()
-                                replied_by_list = "; ".join(responder_names) if responder_names else latest_name
-                                
-                                # Only mark as replied if there are actual responders (not just original sender)
-                                if responder_names:
-                                    task_data.reply_status = "Replied"
-                                    task_data.replied_by = replied_by_list
-                                    task_data.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
-                                    task_data.reply_summary = reply_task.email_summary if reply_task else ''
-                                    task_data.status = self._determine_task_status(thread_messages)
-                                    
-                                    logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
-                                    logger.info(f"  → Task status: {task_data.status}")
-                                else:
-                                    logger.info(f"  → Thread has {len(thread_messages) - 1} message(s) but only from original sender")
-                            
-                            # Store in Google Sheets
-                            if self.sheets.add_task(task_data):
-                                self.gmail.mark_as_read(email['message_id'])
-                                processed_count += 1
-                                logger.info(f"  ✓ Added: {task_data.email_subject[:50]}...")
-                            else:
-                                logger.warning(f"  ✗ Failed to add to sheets")
-                        else:
-                            logger.warning(f"  ✗ Failed to parse email")
+                    thread_messages = []
+
+                # Fallback: if thread fetch failed or returned empty, use the email itself
+                # This ensures no email is ever silently dropped
+                if not thread_messages:
+                    logger.warning(f"  → Thread fetch returned empty, using email directly")
+                    thread_messages = [email]
+
+                # Always use the first (oldest) message as the original email
+                original_email_msg = thread_messages[0]
+                orig_sender = original_email_msg.get('from', '')
+
+                logger.info(f"  → Found {len(thread_messages)} messages in thread")
+
+                # Parse the original email
+                original_task = self.parser.parse_email(original_email_msg)
+
+                if not original_task:
+                    logger.warning(f"  ✗ Failed to parse email, skipping")
+                    continue
+
+                # Set origin type based on original sender
+                original_task.origin_type = self._determine_origin_type(orig_sender)
+                logger.info(f"  → Origin Type: {original_task.origin_type}")
+
+                # If thread has replies, enrich task with reply data before adding
+                if len(thread_messages) > 1:
+                    latest_reply = thread_messages[-1]  # Last message is latest reply
+                    reply_task = self.parser.parse_email(latest_reply)
+
+                    # Collect all unique responder names (exclude original sender)
+                    original_from = original_email_msg.get('from', '')
+                    original_from_email = (
+                        original_from.split('<')[1].split('>')[0].strip().lower()
+                        if '<' in original_from else original_from.strip().lower()
+                    )
+                    responder_names = []
+                    seen_names = set()
+
+                    for msg in thread_messages[1:]:  # Skip first message (original)
+                        responder = msg.get('from', 'Unknown')
+                        resp_email = (
+                            responder.split('<')[1].split('>')[0].strip().lower()
+                            if '<' in responder else responder.strip().lower()
+                        )
+                        resp_name = (
+                            responder.split('<')[0].strip().strip('"').strip("'")
+                            if '<' in responder else responder.strip()
+                        )
+                        if resp_email != original_from_email and resp_name.lower() not in seen_names and resp_name:
+                            responder_names.append(resp_name)
+                            seen_names.add(resp_name.lower())
+
+                    latest_from = latest_reply.get('from', 'Unknown')
+                    latest_name = (
+                        latest_from.split('<')[0].strip().strip('"').strip("'")
+                        if '<' in latest_from else latest_from.strip()
+                    )
+                    replied_by_list = "; ".join(responder_names) if responder_names else latest_name
+
+                    if responder_names:
+                        # Update task with reply info
+                        original_task.reply_status = "Replied"
+                        original_task.replied_by = replied_by_list
+                        original_task.reply_date = reply_task.date_sent if reply_task else latest_reply.get('date_sent', '')
+                        original_task.reply_summary = reply_task.email_summary if reply_task else ''
+                        original_task.status = self._determine_task_status(thread_messages)
+
+                        logger.info(f"  → Thread has {len(thread_messages) - 1} reply(s) from: {replied_by_list}")
+                        logger.info(f"  → Task status: {original_task.status}")
                     else:
-                        logger.warning(f"  ✗ Could not fetch thread")
-                    
+                        logger.info(f"  → Thread has {len(thread_messages) - 1} message(s) but only from original sender")
+
+                # Add to Google Sheets
+                if self.sheets.add_task(original_task):
+                    if email.get('message_id'):
+                        self.gmail.mark_as_read(email['message_id'])
+                    processed_count += 1
+                    existing_thread_ids.add(thread_id)  # Prevent re-check in same run
+                    logger.info(f"  ✓ Added: {original_task.email_subject[:50]}...")
+                else:
+                    logger.warning(f"  ✗ Failed to add to sheets")
+
             except Exception as e:
                 logger.error(f"  ✗ Error processing email: {e}")
-        
-        logger.info(f"Processed {processed_count}/{len(emails)} emails")
+
+        logger.info(f"Processed {processed_count}/{len(unique_emails)} unique threads")
         return processed_count
     
     def run_once(self):
