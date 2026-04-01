@@ -2,12 +2,15 @@
 Flask Web Application - Email Dashboard
 Displays email tracking data from Google Sheets in a beautiful table interface.
 Includes /process endpoint for n8n or external cron triggers.
+Chat scheduler runs automatically in background thread on startup.
 """
 from flask import Flask, jsonify, request
 from src.services.sheets_service import GoogleSheetsService
 from config import Config
 import os
 import threading
+import time
+import schedule
 from datetime import datetime
 
 app = Flask(__name__)
@@ -16,12 +19,20 @@ app.config['SECRET_KEY'] = os.urandom(24)
 # Initialize Google Sheets Service
 sheets_service = GoogleSheetsService()
 
-# Track processing state to prevent overlapping runs
+# Track email processing state to prevent overlapping runs
 _processing_lock = threading.Lock()
 _is_processing = False
 _last_run = None
 _last_result = None
 
+# Track chat scheduler state
+_chat_last_run = None
+_chat_last_result = None
+
+
+# ─────────────────────────────────────────────
+# EMAIL PROCESSING (triggered by n8n)
+# ─────────────────────────────────────────────
 
 def _run_email_processing():
     """Background thread that does the actual email processing."""
@@ -32,21 +43,77 @@ def _run_email_processing():
         count = agent.process_emails()
         _last_run = datetime.utcnow()
         _last_result = {'processed': count, 'status': 'success'}
-        print(f"[Process] Completed. Processed {count} emails at {_last_run.isoformat()}")
+        print(f"[Email] Completed. Processed {count} emails at {_last_run.isoformat()}")
     except Exception as e:
         _last_run = datetime.utcnow()
         _last_result = {'error': str(e), 'status': 'failed'}
-        print(f"[Process] Failed: {e}")
+        print(f"[Email] Failed: {e}")
     finally:
         _is_processing = False
         _processing_lock.release()
 
 
+# ─────────────────────────────────────────────
+# CHAT PROCESSING (self-timed, runs automatically)
+# ─────────────────────────────────────────────
+
+def _chat_job():
+    """Single chat processing run — fetches new G Chat messages and writes to sheet."""
+    global _chat_last_run, _chat_last_result
+    print(f"[Chat] Running check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}...")
+    try:
+        from src.agents import ChatToSheetsAgent
+        agent = ChatToSheetsAgent()
+        count = agent.process_messages()
+        _chat_last_run = datetime.utcnow()
+        _chat_last_result = {'inserted': count, 'status': 'success'}
+        print(f"[Chat] Done. Inserted {count} new message(s).")
+    except Exception as e:
+        _chat_last_run = datetime.utcnow()
+        _chat_last_result = {'error': str(e), 'status': 'failed'}
+        print(f"[Chat] Failed: {e}")
+
+
+def _start_chat_scheduler():
+    """
+    Runs in a daemon thread forever.
+    Calls _chat_job() immediately on startup, then every N minutes.
+    Uses CHAT_CHECK_INTERVAL_MINUTES from config (default: 5).
+    If CHAT_SPACE_ID is not set, chat scheduler is silently disabled.
+    """
+    if not Config.CHAT_SPACE_ID:
+        print("[Chat] CHAT_SPACE_ID not set — chat scheduler disabled.")
+        return
+
+    interval = Config.CHAT_CHECK_INTERVAL_MINUTES
+    print(f"[Chat] Scheduler started. Space: {Config.CHAT_SPACE_ID} | Interval: {interval} min(s).")
+
+    # Run once immediately on startup
+    _chat_job()
+
+    # Then schedule every N minutes
+    schedule.every(interval).minutes.do(_chat_job)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
+
+
+# Start chat scheduler as a daemon thread when the app loads
+# daemon=True means it will automatically stop if the main process stops
+_chat_thread = threading.Thread(target=_start_chat_scheduler, daemon=True, name="chat-scheduler")
+_chat_thread.start()
+
+
+# ─────────────────────────────────────────────
+# ROUTES
+# ─────────────────────────────────────────────
+
 @app.route('/')
 def index():
     """Status page."""
     return jsonify({
-        'service': 'Email-to-Sheets Agent',
+        'service': 'Email + Chat to Sheets Agent',
         'status': 'running',
         'version': '1.0.0',
         'endpoints': {
@@ -60,13 +127,20 @@ def index():
 
 @app.route('/health')
 def health():
-    """Health check endpoint."""
+    """Health check endpoint — shows status of both email and chat."""
     return jsonify({
         'status': 'ok',
-        'processing': _is_processing,
         'timestamp': datetime.utcnow().isoformat(),
-        'last_run': _last_run.isoformat() if _last_run else None,
-        'last_result': _last_result
+        'email': {
+            'processing': _is_processing,
+            'last_run': _last_run.isoformat() if _last_run else None,
+            'last_result': _last_result
+        },
+        'chat': {
+            'enabled': bool(Config.CHAT_SPACE_ID),
+            'last_run': _chat_last_run.isoformat() if _chat_last_run else None,
+            'last_result': _chat_last_result
+        }
     })
 
 
@@ -120,15 +194,12 @@ def get_stats():
     """API endpoint to fetch statistics."""
     try:
         data = sheets_service.get_all_data()
-        
-        # Calculate statistics
+
         total_emails = len(data)
         replied_emails = len([d for d in data if d.get('Reply Status') == 'Replied'])
         pending_emails = total_emails - replied_emails
-        
-        # Unique senders
         senders = set(d.get('Sender Email', '') for d in data if d.get('Sender Email'))
-        
+
         return jsonify({
             'success': True,
             'stats': {
@@ -148,7 +219,3 @@ def get_stats():
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=True)
-
-
-
-
