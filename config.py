@@ -56,6 +56,70 @@ class Config:
         "https://www.googleapis.com/auth/gmail.readonly",
         "https://www.googleapis.com/auth/gmail.modify"
     ]
+
+    # ----------------------------------------------------------------------
+    # Google Chat Configuration
+    #
+    # The following settings enable an optional pipeline for monitoring a
+    # Google Chat space and writing selected messages to a secondary sheet.
+    # If CHAT_SPACE_ID is not provided then the Chat pipeline is disabled by
+    # default.  When enabled, only messages from specific users are captured.
+
+    # Space ID of the Google Chat room to monitor.  This is the identifier
+    # following the `spaces/` prefix in the space resource name.  It can be
+    # found in the Chat web URL (for example the segment after `#chat/`).
+    CHAT_SPACE_ID: str = os.getenv("CHAT_SPACE_ID", "")
+
+    # Name of the worksheet within the Google spreadsheet used for Chat
+    # messages.  The sheet will be created if it doesn't already exist.  The
+    # default name is ``Sheet2`` to avoid clashing with the primary sheet.
+    CHAT_SHEET_NAME: str = os.getenv("CHAT_SHEET_NAME", "Sheet2")
+
+    # Comma‑separated list of email addresses whose messages should be
+    # recorded from the Chat space.  All addresses are converted to lower
+    # case.  Messages sent by users outside of this list will be ignored.
+    CHAT_USER_EMAILS: list = [
+        email.strip().lower()
+        for email in os.getenv(
+            "CHAT_USER_EMAILS",
+            "talha@onescreensolutions.com,sijjil@onescreensolutions.com,junaid@onescreensolutions.com,david@onescreensolutions.com,alis@onescreensolutions.com",
+        ).split(",")
+        if email.strip()
+    ]
+
+    # Frequency in minutes at which to poll the Chat space for new
+    # messages.  Setting this to zero disables automatic polling; the Chat
+    # agent can still be invoked manually via the command line.  The default
+    # mirrors the email polling interval.
+    CHAT_CHECK_INTERVAL_MINUTES: int = int(os.getenv("CHAT_CHECK_INTERVAL_MINUTES", "5"))
+
+    # When true, the Chat agent will import all messages from the space
+    # starting from January 1, 2026 on the first run.  After a successful
+    # import, set this to false to only fetch messages from the last seven
+    # days.  You can override this behaviour by passing explicit date
+    # parameters when invoking the Chat agent programmatically.
+    CHAT_INITIAL_IMPORT: bool = os.getenv("CHAT_INITIAL_IMPORT", "false").lower() == "true"
+
+    # OAuth2 scopes required for reading chat messages and membership data.  The
+    # readonly scopes ensure that the integration cannot modify or delete
+    # messages within the space.  The memberships scope allows lookup of
+    # membership details by email when necessary.
+    CHAT_SCOPES = [
+        "https://www.googleapis.com/auth/chat.messages.readonly",
+        "https://www.googleapis.com/auth/chat.memberships.readonly",
+    ]
+
+    # Path to the OAuth2 client secrets file used for Chat authentication.
+    # Defaults to the same file used by the Gmail integration.  Modify
+    # CHAT_CREDENTIALS_PATH if you wish to use a different client for Chat.
+    CHAT_CREDENTIALS_PATH: str = os.getenv("CHAT_CREDENTIALS_PATH", GMAIL_CREDENTIALS_PATH)
+
+    # Location of the locally stored OAuth2 token for Chat.  When running
+    # locally for the first time, you will be prompted to complete the
+    # authentication flow and the resulting token will be persisted at this
+    # path.  On Render, provide a `CHAT_TOKEN_JSON` environment variable
+    # containing the JSON representation of the token.
+    CHAT_TOKEN_PATH: str = os.getenv("CHAT_TOKEN_PATH", "chat_token.json")
     
     # Google Sheets API Scopes
     SHEETS_SCOPES = [
