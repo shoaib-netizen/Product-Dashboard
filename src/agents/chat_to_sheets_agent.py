@@ -21,7 +21,14 @@ import logging
 from typing import Optional
 
 from config import Config
-from src.services import GoogleChatService, ChatSheetsService
+
+# Import directly from specific files instead of from src.services package.
+# This avoids a circular import that occurs because src.services.__init__.py
+# loads sheets_service, which loads src.agents, which loads this file,
+# which then tries to import from src.services before it has finished loading.
+from src.services.chat_service import GoogleChatService
+from src.services.chat_sheets_service import ChatSheetsService
+
 from src.utils import setup_logger
 
 
