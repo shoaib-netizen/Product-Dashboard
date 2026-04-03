@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 
 from google.auth.transport.requests import Request
@@ -202,7 +202,7 @@ class GoogleChatService:
                         parent=f"spaces/{Config.CHAT_SPACE_ID}",
                         pageSize=100,
                         pageToken=next_page,
-                        filter='createTime > "2020-01-01T00:00:00Z"',
+                        filter=f'createTime > "{(datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")}"',
                         orderBy="createTime ASC",
                         showDeleted=False,
                     )

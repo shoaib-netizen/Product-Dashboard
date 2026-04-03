@@ -51,9 +51,11 @@ class ChatSheetsService:
         """Authenticate and initialize the worksheet."""
         self.creds = self._authenticate()
         self.client = gspread.authorize(self.creds)
+        self._is_new_sheet = False
         self.sheet = self._get_sheet()
         self._ensure_headers()
-        self._format_as_table()
+        if self._is_new_sheet:
+            self._format_as_table()
 
     def _authenticate(self) -> Credentials:
         """Authenticate with Google Sheets using a service account."""
@@ -81,9 +83,11 @@ class ChatSheetsService:
         """Retrieve or create the worksheet for Chat messages."""
         spreadsheet = self.client.open_by_key(Config.GOOGLE_SHEET_ID)
         try:
-            return spreadsheet.worksheet(Config.CHAT_SHEET_NAME)
+            sheet = spreadsheet.worksheet(Config.CHAT_SHEET_NAME)
+            self._is_new_sheet = False
+            return sheet
         except gspread.WorksheetNotFound:
-            # Create worksheet with appropriate number of columns
+            self._is_new_sheet = True
             return spreadsheet.add_worksheet(
                 title=Config.CHAT_SHEET_NAME,
                 rows=1000,
@@ -332,25 +336,22 @@ class ChatSheetsService:
             except Exception as e:
                 print(f"[ChatSheetsService] Color formatting error: {e}") 
 
-                
+
     def update_reply_statuses(self, replied_message_ids: set) -> int:
         """Update Status column for existing rows that have now been replied to."""
         if not replied_message_ids:
             return 0
 
         try:
-            all_rows = self.sheet.get_all_values()
+            msg_ids = self.sheet.col_values(2)[1:]   # Column B, skip header
+            statuses = self.sheet.col_values(8)[1:]  # Column H, skip header
         except Exception as e:
             print(f"[ChatSheetsService] Could not read sheet: {e}")
             return 0
 
         batch_updates = []
-        for i, row in enumerate(all_rows[1:], start=2):  # skip header, 1-indexed
-            if len(row) < 8:
-                continue
-            msg_id = row[1]           # Column B = Message ID
-            current_status = row[7]   # Column H = Status
-            if current_status == "Not Replied" and msg_id in replied_message_ids:
+        for i, (msg_id, status) in enumerate(zip(msg_ids, statuses), start=2):
+            if status == "Not Replied" and msg_id in replied_message_ids:
                 batch_updates.append({
                     "range": f"'{self.sheet.title}'!H{i}",
                     "values": [["Replied"]],
