@@ -16,8 +16,14 @@ from datetime import datetime
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
 
-# Initialize Google Sheets Service
-sheets_service = GoogleSheetsService()
+# Lazy-initialized Google Sheets Service (avoids heavy API calls on every worker startup)
+_sheets_service = None
+
+def get_sheets_service():
+    global _sheets_service
+    if _sheets_service is None:
+        _sheets_service = GoogleSheetsService()
+    return _sheets_service
 
 # Track email processing state to prevent overlapping runs
 _processing_lock = threading.Lock()
@@ -34,13 +40,16 @@ _chat_last_result = None
 # EMAIL PROCESSING (triggered by n8n)
 # ─────────────────────────────────────────────
 
+_email_agent = None
+
 def _run_email_processing():
     """Background thread that does the actual email processing."""
-    global _is_processing, _last_run, _last_result
+    global _is_processing, _last_run, _last_result, _email_agent
     try:
-        from main import EmailToSheetsAgent
-        agent = EmailToSheetsAgent()
-        count = agent.process_emails()
+        if _email_agent is None:
+            from main import EmailToSheetsAgent
+            _email_agent = EmailToSheetsAgent()
+        count = _email_agent.process_emails()
         _last_run = datetime.utcnow()
         _last_result = {'processed': count, 'status': 'success'}
         print(f"[Email] Completed. Processed {count} emails at {_last_run.isoformat()}")
@@ -57,14 +66,17 @@ def _run_email_processing():
 # CHAT PROCESSING (self-timed, runs automatically)
 # ─────────────────────────────────────────────
 
+_chat_agent = None
+
 def _chat_job():
     """Single chat processing run — fetches new G Chat messages and writes to sheet."""
-    global _chat_last_run, _chat_last_result
+    global _chat_last_run, _chat_last_result, _chat_agent
     print(f"[Chat] Running check at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}...")
     try:
-        from src.agents import ChatToSheetsAgent
-        agent = ChatToSheetsAgent()
-        count = agent.process_messages()
+        if _chat_agent is None:
+            from src.agents import ChatToSheetsAgent
+            _chat_agent = ChatToSheetsAgent()
+        count = _chat_agent.process_messages()
         _chat_last_run = datetime.utcnow()
         _chat_last_result = {'inserted': count, 'status': 'success'}
         print(f"[Chat] Done. Inserted {count} new message(s).")
@@ -172,11 +184,22 @@ def process_emails():
     })
 
 
+# Simple in-memory cache for sheet data (60 second TTL)
+_data_cache = {'data': None, 'timestamp': 0}
+CACHE_TTL = 60  # seconds
+
+def get_cached_data():
+    if time.time() - _data_cache['timestamp'] > CACHE_TTL:
+        _data_cache['data'] = get_sheets_service().get_all_data()
+        _data_cache['timestamp'] = time.time()
+    return _data_cache['data']
+
+
 @app.route('/api/emails')
 def get_emails():
     """API endpoint to fetch all emails data."""
     try:
-        data = sheets_service.get_all_data()
+        data = get_cached_data()
         return jsonify({
             'success': True,
             'data': data,
@@ -193,7 +216,7 @@ def get_emails():
 def get_stats():
     """API endpoint to fetch statistics."""
     try:
-        data = sheets_service.get_all_data()
+        data = get_cached_data()
 
         total_emails = len(data)
         replied_emails = len([d for d in data if d.get('Reply Status') == 'Replied'])
