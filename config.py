@@ -91,7 +91,7 @@ class Config:
     # messages.  Setting this to zero disables automatic polling; the Chat
     # agent can still be invoked manually via the command line.  The default
     # mirrors the email polling interval.
-    CHAT_CHECK_INTERVAL_MINUTES: int = int(os.getenv("CHAT_CHECK_INTERVAL_MINUTES", "5"))
+    CHAT_CHECK_INTERVAL_MINUTES: int = int(os.getenv("CHAT_CHECK_INTERVAL_MINUTES", "60"))
 
     # When true, the Chat agent will import all messages from the space
     # starting from January 1, 2026 on the first run.  After a successful
