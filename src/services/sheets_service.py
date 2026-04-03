@@ -713,10 +713,11 @@ class GoogleSheetsService:
             updates = []
             
             # Column J (10): Reply Status
-            updates.append({
-                'range': f'J{row_num}',
-                'values': [['Replied']]
-            })
+            if 'reply_status' in reply_data:
+                updates.append({
+                    'range': f'J{row_num}',
+                    'values': [[reply_data['reply_status']]]
+                })
             
             # Column K (11): Replied By
             if 'replied_by' in reply_data:

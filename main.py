@@ -173,17 +173,66 @@ class EmailToSheetsAgent:
                     logger.info(f"  → Skipping: already processed this thread in this session")
                     continue
 
-                # Skip if thread already exists in the sheet
+                # If thread already exists in sheet — check if there are new replies to update
                 if thread_id and thread_id in existing_thread_ids:
-                    logger.info(f"  → Skipping: thread already in sheet")
+                    thread_messages = self.gmail.fetch_thread_messages(thread_id)
+
+                    # Only update if thread has actual replies (more than 1 message)
+                    if len(thread_messages) > 1:
+                        original_email_msg = thread_messages[0]
+                        original_from = original_email_msg.get('from', '')
+                        original_from_email = (
+                            original_from.split('<')[1].split('>')[0].strip().lower()
+                            if '<' in original_from else original_from.strip().lower()
+                        )
+
+                        # Collect all unique repliers (exclude original sender)
+                        responder_names = []
+                        seen_names = set()
+                        for msg in thread_messages[1:]:
+                            responder = msg.get('from', '')
+                            resp_email = (
+                                responder.split('<')[1].split('>')[0].strip().lower()
+                                if '<' in responder else responder.strip().lower()
+                            )
+                            resp_name = (
+                                responder.split('<')[0].strip().strip('"').strip("'")
+                                if '<' in responder else responder.strip()
+                            )
+                            if resp_email != original_from_email and resp_name.lower() not in seen_names and resp_name:
+                                responder_names.append(resp_name)
+                                seen_names.add(resp_name.lower())
+
+                        if responder_names:
+                            latest_reply = thread_messages[-1]
+                            reply_task = self.parser.parse_email(latest_reply)
+                            task_status = self._determine_task_status(thread_messages)
+
+                            updated = self.sheets.update_thread_reply(thread_id, {
+                                'reply_status': 'Replied',
+                                'replied_by': '; '.join(responder_names),
+                                'reply_date': reply_task.date_sent if reply_task else latest_reply.get('date_sent', ''),
+                                'reply_summary': reply_task.email_summary if reply_task else '',
+                                'task_status': task_status
+                            })
+
+                            if updated:
+                                logger.info(f"  → Updated reply for existing thread: {thread_id} | Replied by: {'; '.join(responder_names)}")
+                            else:
+                                logger.info(f"  → Thread exists but update failed: {thread_id}")
+                        else:
+                            logger.info(f"  → Thread exists, no new external replies: {thread_id}")
+                    else:
+                        logger.info(f"  → Thread exists, no replies yet: {thread_id}")
+
                     if email.get('message_id'):
                         self.gmail.mark_as_read(email['message_id'])
                     continue
 
                 # Mark thread as processed IMMEDIATELY to prevent duplicates
-                # even if an error occurs mid-processing
                 if thread_id:
                     self.processed_threads.add(thread_id)
+
 
                 # Fetch full thread to get complete conversation including all replies
                 if thread_id:
