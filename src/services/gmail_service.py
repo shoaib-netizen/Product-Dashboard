@@ -239,7 +239,7 @@ class GmailService:
             List of email dictionaries sorted by date (oldest first)
         """
         try:
-            # Get thread details
+            # Get thread details — format='full' already contains all message data
             thread = self.service.users().threads().get(
                 userId='me',
                 id=thread_id,
@@ -250,10 +250,51 @@ class GmailService:
             emails = []
             
             for msg in messages:
-                email_details = self._get_email_details(msg['id'])
-                if email_details:
-                    email_details['message_id'] = msg['id']
+                # Parse directly from the already-fetched thread data
+                # DO NOT call _get_email_details(msg['id']) again — that makes
+                # a separate API call per message and silently drops replies on failure
+                try:
+                    headers = {h['name']: h['value'] for h in msg['payload']['headers']}
+                    
+                    # Parse date
+                    from email.utils import parsedate_to_datetime
+                    from datetime import datetime
+                    date_str = headers.get('Date', '')
+                    try:
+                        dt = parsedate_to_datetime(date_str)
+                        date_sent = dt.strftime('%Y-%m-%d')
+                    except Exception:
+                        date_sent = datetime.now().strftime('%Y-%m-%d')
+                    
+                    # Extract body from this message's payload
+                    body = self._extract_body(msg['payload'])
+                    
+                    email_details = {
+                        'subject': headers.get('Subject', 'No Subject'),
+                        'from': headers.get('From', 'Unknown'),
+                        'to': headers.get('To', ''),
+                        'date': date_sent,
+                        'date_sent': date_sent,
+                        'date_received': date_sent,
+                        'body': body,
+                        'thread_id': msg.get('threadId', thread_id),
+                        'message_id': msg['id']
+                    }
                     emails.append(email_details)
+                except Exception as parse_err:
+                    print(f"[GmailService] Could not parse message {msg['id']} in thread, skipping: {parse_err}")
+                    # Still append a stub so the message COUNT stays accurate
+                    emails.append({
+                        'subject': '',
+                        'from': '',
+                        'to': '',
+                        'date': '',
+                        'date_sent': '',
+                        'date_received': '',
+                        'body': '',
+                        'thread_id': msg.get('threadId', thread_id),
+                        'message_id': msg['id']
+                    })
             
             # Sort by date (oldest first) to get original email first
             emails.sort(key=lambda x: x.get('date_sent', ''))
