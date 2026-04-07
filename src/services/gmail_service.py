@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Optional
+import requests as _requests
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -53,7 +54,9 @@ class GmailService:
         # Refresh or create new credentials
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+                session = _requests.Session()
+                session.timeout = 30
+                creds.refresh(Request(session=session))
                 # Update env-based token won't persist, but save to file if local
                 if not gmail_token_json:
                     with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
