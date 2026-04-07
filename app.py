@@ -71,11 +71,12 @@ def _run_email_processing():
         _last_result = {'processed': count, 'status': 'success'}
         print(f"[Email] Completed. Processed {count} emails at {_last_run.isoformat()}")
     except Exception as e:
-        _last_run = datetime.utcnow()
-        _last_result = {'error': str(e), 'status': 'failed', 'traceback': traceback.format_exc()}
+        
+        _last_result = {'error': str(e), 'status': 'failed'}
         print(f"[Email] FAILED with exception: {e}")
         print(traceback.format_exc())  # Full traceback to Render logs
-        _email_agent = None  # Reset agent so next run re-initializes cleanly
+        if 'credentials' in str(e).lower() or 'token' in str(e).lower():
+         _email_agent = None  # Reset agent so next run re-initializes cleanly
     finally:
         # Always reset the flag — no lock that can get stuck
         _is_processing = False

@@ -45,7 +45,10 @@ class GoogleSheetsService:
         self.client = gspread.Client(auth=self.creds)
         self.sheet = self._get_sheet()
         self._ensure_headers()
-        self._format_as_table()   # <-- important
+        # Only format if sheet is empty/new — not every single run
+        all_values = self.sheet.get_all_values()
+        if len(all_values) <= 1:
+         self._format_as_table()  # Only runs once on fresh sheet
     
     def _authenticate(self) -> Credentials:
         """Authenticate with Google Sheets using service account."""
