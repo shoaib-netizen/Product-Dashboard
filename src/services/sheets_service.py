@@ -42,7 +42,7 @@ class GoogleSheetsService:
     def __init__(self):
         """Initialize Google Sheets service."""
         self.creds = self._authenticate()
-        self.client = gspread.authorize(self.creds)
+        self.client = gspread.Client(auth=self.creds)
         self.sheet = self._get_sheet()
         self._ensure_headers()
         self._format_as_table()   # <-- important

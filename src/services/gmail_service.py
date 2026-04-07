@@ -29,7 +29,7 @@ class GmailService:
     def __init__(self):
         """Initialize Gmail service with authentication."""
         self.creds = self._authenticate()
-        self.service = build('gmail', 'v1', credentials=self.creds)
+        self.service = build('gmail', 'v1', credentials=self.creds, cache_discovery=False)
         self.processed_label = "PROCESSED_BY_AGENT"
     
     def _authenticate(self) -> Credentials:
