@@ -46,9 +46,17 @@ class EmailToSheetsAgent:
             sys.exit(1)
         
         # Initialize components
+        logger.info("Step 1: Initializing Gmail...")
         self.gmail = GmailService()
+        logger.info("Step 1 done ✓")
+        
+        logger.info("Step 2: Initializing Parser...")
         self.parser = EmailParserAgent()
+        logger.info("Step 2 done ✓")
+        
+        logger.info("Step 3: Initializing Sheets...")
         self.sheets = GoogleSheetsService()
+        logger.info("Step 3 done ✓")
         
         # Track processed threads within a session to prevent duplicates
         self.processed_threads = set()
