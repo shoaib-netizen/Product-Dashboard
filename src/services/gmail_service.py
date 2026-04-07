@@ -54,13 +54,21 @@ class GmailService:
         # Refresh or create new credentials
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
-                session = _requests.Session()
-                session.timeout = 30
-                creds.refresh(Request(session=session))
-                # Update env-based token won't persist, but save to file if local
-                if not gmail_token_json:
-                    with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
-                        token.write(creds.to_json())
+                try:
+                    session = _requests.Session()
+                    session.timeout = 30
+                    creds.refresh(Request(session=session))
+                    print("[GmailService] Token refreshed successfully ✓")
+                    # Save to file if local
+                    if not gmail_token_json:
+                        with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
+                            token.write(creds.to_json())
+                except Exception as refresh_error:
+                    print(f"[GmailService] Token refresh failed: {refresh_error}")
+                    raise RuntimeError(
+                        f"Gmail token refresh failed on Render: {refresh_error}. "
+                        "Please regenerate token.json locally and update GMAIL_TOKEN_JSON env var."
+                    )
             else:
                 # Browser flow only works locally
                 if gmail_token_json or gmail_credentials_json:
