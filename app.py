@@ -43,7 +43,7 @@ _processing_started_at = None  # Track when processing started (for timeout safe
 _last_run = None
 _last_result = None
 
-MAX_PROCESSING_MINUTES = 10  # Auto-reset if stuck longer than this
+MAX_PROCESSING_MINUTES = 30  # Auto-reset if stuck longer than this
 
 
 def _is_stuck():
@@ -70,13 +70,13 @@ def _run_email_processing():
         _last_run = datetime.utcnow()
         _last_result = {'processed': count, 'status': 'success'}
         print(f"[Email] Completed. Processed {count} emails at {_last_run.isoformat()}")
+    # AFTER
     except Exception as e:
-        
-        _last_result = {'error': str(e), 'status': 'failed'}
+        _last_run = datetime.utcnow()
+        _last_result = {'error': str(e), 'status': 'failed', 'traceback': traceback.format_exc()}
         print(f"[Email] FAILED with exception: {e}")
         print(traceback.format_exc())  # Full traceback to Render logs
-        if 'credentials' in str(e).lower() or 'token' in str(e).lower():
-         _email_agent = None  # Reset agent so next run re-initializes cleanly
+        _email_agent = None  # Always reset agent on any failure so next run re-initializes cleanly
     finally:
         # Always reset the flag — no lock that can get stuck
         _is_processing = False
@@ -219,13 +219,15 @@ def process_emails():
         elapsed = None
         if _processing_started_at:
             elapsed = int((datetime.utcnow() - _processing_started_at).total_seconds())
+        # AFTER
         return jsonify({
             'success': False,
-            'message': 'Processing already in progress',
+            'status': 'busy',
+            'message': 'Processing already in progress — will retry next hour',
             'elapsed_seconds': elapsed,
             'tip': 'Add ?force=true to override, or POST to /reset to unstick',
             'last_run': _last_run.isoformat() if _last_run else None
-        }), 429
+        }), 200
 
     _is_processing = True
     _processing_started_at = datetime.utcnow()

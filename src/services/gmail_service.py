@@ -85,18 +85,28 @@ class GmailService:
         
         return creds
     
-    def fetch_recent_emails(self) -> list[dict]:
+    # AFTER
+    def fetch_recent_emails(self, existing_thread_ids: set = None) -> list[dict]:
         """
         Fetch ALL recent emails from inbox (read or unread).
         
         If INITIAL_IMPORT=true: fetches ALL emails from Jan 1, 2026
         If INITIAL_IMPORT=false: fetches ALL emails from last 7 days
+
+        Args:
+            existing_thread_ids: Set of thread IDs already in the sheet.
+                                 Threads in this set are fetched as stubs only
+                                 (no expensive _get_email_details call) so reply
+                                 status can still be updated in process_emails.
         
         Returns:
             List of email dictionaries with subject, from, date, body
         """
         from datetime import datetime, timedelta
         
+        if existing_thread_ids is None:
+            existing_thread_ids = set()
+
         # Determine start date based on INITIAL_IMPORT setting
         if Config.INITIAL_IMPORT:
             start_date = "2026/01/01"
@@ -121,7 +131,7 @@ class GmailService:
             query += f" from:{Config.FILTER_FROM_EMAIL}"
         
         try:
-            # Paginate through ALL results
+            # Paginate through ALL results (get IDs only — fast, no body)
             all_messages = []
             page_token = None
             
@@ -145,7 +155,29 @@ class GmailService:
             print(f"[GmailService] Total emails found: {len(all_messages)}")
             
             emails = []
+            skipped = 0
             for i, msg in enumerate(all_messages):
+                thread_id = msg.get('threadId', '')
+
+                # If this thread is already in the sheet, return a lightweight stub.
+                # process_emails() will fetch full thread details only when needed for reply updates.
+                # This avoids one expensive API call per already-processed email.
+                if thread_id and thread_id in existing_thread_ids:
+                    emails.append({
+                        'subject': '',
+                        'from': '',
+                        'to': '',
+                        'date': '',
+                        'date_sent': '',
+                        'date_received': '',
+                        'body': '',
+                        'thread_id': thread_id,
+                        'message_id': msg['id'],
+                        '_stub': True  # Mark so process_emails knows this is a stub
+                    })
+                    skipped += 1
+                    continue
+
                 email_data = self._get_email_details(msg['id'])
                 if email_data:
                     email_data['message_id'] = msg['id']
@@ -155,7 +187,11 @@ class GmailService:
                 if (i + 1) % 50 == 0:
                     print(f"[GmailService] Processed {i + 1}/{len(all_messages)} email details...")
             
+            print(f"[GmailService] Skipped {skipped} already-in-sheet threads, fetched details for {len(emails) - skipped} new ones")
+
             # Sort by date sent (oldest first - ascending order)
+            # Stubs have empty date_sent so they sort to front — that's fine,
+            # they'll be handled by the "thread already exists" branch and skipped for insert
             emails.sort(key=lambda x: x.get('date_sent', ''), reverse=False)
             
             return emails

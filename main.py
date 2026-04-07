@@ -174,25 +174,29 @@ class EmailToSheetsAgent:
         Returns:
             Number of emails processed
         """
+        # AFTER
         logger.info("Checking for new emails...")
 
-        # Fetch ALL recent emails (read or unread) - will skip those already in sheet
+        # Pre-load all existing thread IDs from sheet FIRST — before any Gmail calls.
+        # This lets fetch_recent_emails skip expensive _get_email_details calls for
+        # threads already in the sheet, dramatically cutting API usage and run time.
+        try:
+            existing_thread_ids = set(tid for tid in self.sheets.sheet.col_values(2)[1:] if tid)
+            logger.info(f"Loaded {len(existing_thread_ids)} existing thread IDs from sheet")
+        except Exception:
+            existing_thread_ids = set()
+            logger.warning("Could not load existing thread IDs from sheet — will fetch all email details")
+
+        # Fetch ALL recent emails (read or unread) — already-in-sheet threads returned as stubs
         # If INITIAL_IMPORT=true: fetches ALL from Jan 1, 2026
-        # If INITIAL_IMPORT=false: fetches ALL from last 7 days
-        emails = self.gmail.fetch_recent_emails()
+        # If INITIAL_IMPORT=false: fetches ALL emails from last 7 days
+        emails = self.gmail.fetch_recent_emails(existing_thread_ids=existing_thread_ids)
 
         if not emails:
             logger.info("No new emails found")
             return 0
 
-        logger.info(f"Found {len(emails)} new email(s)")
-
-        # Pre-load all existing thread IDs from sheet ONCE upfront
-        # This avoids one separate Google Sheets API call per email
-        try:
-            existing_thread_ids = set(tid for tid in self.sheets.sheet.col_values(2)[1:] if tid)
-        except Exception:
-            existing_thread_ids = set()
+        logger.info(f"Found {len(emails)} email(s) (including stubs for existing threads)")
 
         # Deduplicate by thread_id BEFORE processing anything
         # Gmail returns one message ID per email in a thread, so a thread with
@@ -232,12 +236,16 @@ class EmailToSheetsAgent:
                     if not thread_messages:
                         logger.warning(f"  → Thread {thread_id} fetched empty messages; skipping update")
                     else:
-                        # Extract unique responder names (include all senders except none)
-                        responder_names = self._extract_unique_repliers(thread_messages)
+                        # Get original sender to exclude them from responder list
+                        original_msg = thread_messages[0]
+                        _, orig_email_addr = parseaddr(original_msg.get('from', '') or '')
+                        orig_email_addr = orig_email_addr.lower().strip() if orig_email_addr else ''
+
+                        # Extract unique responder names EXCLUDING the original sender
+                        responder_names = self._extract_unique_repliers(thread_messages, exclude_email=orig_email_addr)
 
                         if responder_names:
                             latest_reply = thread_messages[-1]
-                            # Attempt to parse latest reply for date and summary
                             reply_task = self.parser.parse_email(latest_reply)
                             reply_data = {
                                 'reply_status': 'Replied',
@@ -246,23 +254,16 @@ class EmailToSheetsAgent:
                                 'reply_summary': reply_task.email_summary if reply_task else '',
                                 'task_status': self._determine_task_status(thread_messages)
                             }
+                            updated = self.sheets.update_thread_reply(thread_id, reply_data)
+                            if updated:
+                                logger.info(
+                                    f"  → Updated reply for existing thread: {thread_id} | Replied by: {reply_data['replied_by']}"
+                                )
+                            else:
+                                logger.info(f"  → Thread exists but update failed: {thread_id}")
                         else:
-                            # No replies other than original
-                            reply_data = {
-                                'reply_status': 'No Reply',
-                                'replied_by': '',
-                                'reply_date': '',
-                                'reply_summary': '',
-                                'task_status': 'Pending'
-                            }
-
-                        updated = self.sheets.update_thread_reply(thread_id, reply_data)
-                        if updated:
-                            logger.info(
-                                f"  → Updated reply for existing thread: {thread_id} | Replied by: {reply_data['replied_by']}"
-                            )
-                        else:
-                            logger.info(f"  → Thread exists but update failed: {thread_id}")
+                            # No real replies — do NOT touch the sheet at all
+                            logger.info(f"  → No replies from others for thread {thread_id}, skipping update")
 
                     # Mark the triggering email as read to avoid reprocessing
                     if email.get('message_id'):
