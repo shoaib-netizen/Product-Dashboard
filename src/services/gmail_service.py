@@ -33,25 +33,27 @@ class GmailService:
         self.processed_label = "PROCESSED_BY_AGENT"
     
     def _authenticate(self) -> Credentials:
-        """Authenticate with Gmail API using OAuth2."""
+        """Authenticate with Gmail API using OAuth2, persisting token to Supabase."""
         creds = None
-        
-        # Try loading token from environment variable first (for Render deployment)
-        gmail_token_json = os.getenv("GMAIL_TOKEN_JSON")
-        gmail_credentials_json = os.getenv("GMAIL_CREDENTIALS_JSON")
-        
-        if gmail_token_json:
-            # Load token from env var (Render deployment)
-            token_data = json.loads(gmail_token_json)
+
+        # 1. Try loading from Supabase DB first (production)
+        token_data = self._load_token_from_db()
+        if token_data:
             creds = Credentials.from_authorized_user_info(token_data, Config.GMAIL_SCOPES)
+            print("[GmailService] Token loaded from Supabase ✓")
+
+        # 2. Fallback to GMAIL_TOKEN_JSON env var (first deploy bootstrap)
+        elif os.getenv("GMAIL_TOKEN_JSON"):
+            token_data = json.loads(os.getenv("GMAIL_TOKEN_JSON"))
+            creds = Credentials.from_authorized_user_info(token_data, Config.GMAIL_SCOPES)
+            print("[GmailService] Token loaded from GMAIL_TOKEN_JSON env var ✓")
+
+        # 3. Fallback to local token.json file (local development)
         elif os.path.exists(Config.GMAIL_TOKEN_PATH):
-            # Load token from file (local development)
-            creds = Credentials.from_authorized_user_file(
-                Config.GMAIL_TOKEN_PATH, 
-                Config.GMAIL_SCOPES
-            )
-        
-        # Refresh or create new credentials
+            creds = Credentials.from_authorized_user_file(Config.GMAIL_TOKEN_PATH, Config.GMAIL_SCOPES)
+            print("[GmailService] Token loaded from token.json file ✓")
+
+        # Refresh if expired
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 try:
@@ -59,41 +61,66 @@ class GmailService:
                     session.timeout = 30
                     creds.refresh(Request(session=session))
                     print("[GmailService] Token refreshed successfully ✓")
-                    # Save to file if local
-                    if not gmail_token_json:
-                        with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
-                            token.write(creds.to_json())
-                except Exception as refresh_error:
-                    print(f"[GmailService] Token refresh failed: {refresh_error}")
-                    raise RuntimeError(
-                        f"Gmail token refresh failed on Render: {refresh_error}. "
-                        "Please regenerate token.json locally and update GMAIL_TOKEN_JSON env var."
-                    )
+                    # Save refreshed token back to Supabase
+                    self._save_token_to_db(json.loads(creds.to_json()))
+                    # Also save locally if in local dev
+                    if not os.getenv("GMAIL_TOKEN_JSON"):
+                        with open(Config.GMAIL_TOKEN_PATH, 'w') as f:
+                            f.write(creds.to_json())
+                except Exception as e:
+                    print(f"[GmailService] Token refresh failed: {e}")
+                    raise RuntimeError(f"Gmail token refresh failed: {e}")
             else:
-                # Browser flow only works locally
-                if gmail_token_json or gmail_credentials_json:
+                # Browser flow - local only
+                if os.getenv("RENDER") or (Config.SUPABASE_URL and Config.SUPABASE_KEY):
                     raise RuntimeError(
-                        "Gmail token expired and cannot re-authenticate on Render. "
+                        "Gmail token invalid/expired with no refresh_token on production. "
                         "Please regenerate token.json locally and update GMAIL_TOKEN_JSON env var."
                     )
                 if not os.path.exists(Config.GMAIL_CREDENTIALS_PATH):
-                    raise FileNotFoundError(
-                        f"Gmail credentials not found at {Config.GMAIL_CREDENTIALS_PATH}. "
-                        "Please download from Google Cloud Console."
-                    )
+                    raise FileNotFoundError(f"credentials.json not found.")
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    Config.GMAIL_CREDENTIALS_PATH, 
-                    Config.GMAIL_SCOPES
+                    Config.GMAIL_CREDENTIALS_PATH, Config.GMAIL_SCOPES
                 )
                 creds = flow.run_local_server(port=0)
-                
-                # Save credentials for future use
-                with open(Config.GMAIL_TOKEN_PATH, 'w') as token:
-                    token.write(creds.to_json())
-        
+                self._save_token_to_db(json.loads(creds.to_json()))
+                with open(Config.GMAIL_TOKEN_PATH, 'w') as f:
+                    f.write(creds.to_json())
+
         return creds
-    
-    # AFTER
+
+    def _load_token_from_db(self):
+        """Load OAuth token from Supabase."""
+        try:
+            from supabase import create_client
+            if not Config.SUPABASE_URL or not Config.SUPABASE_KEY:
+                return None
+            sb = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+            result = sb.table("oauth_tokens").select("token_data").eq("id", "gmail").execute()
+            if result.data and result.data[0]["token_data"]:
+                data = result.data[0]["token_data"]
+                if data != {}:  # Skip empty bootstrap row
+                    return data
+        except Exception as e:
+            print(f"[GmailService] Could not load token from Supabase: {e}")
+        return None
+
+    def _save_token_to_db(self, token_data: dict):
+        """Save refreshed OAuth token to Supabase."""
+        try:
+            from supabase import create_client
+            if not Config.SUPABASE_URL or not Config.SUPABASE_KEY:
+                print("[GmailService] Supabase not configured, skipping DB save")
+                return
+            sb = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+            sb.table("oauth_tokens").upsert({
+                "id": "gmail",
+                "token_data": token_data
+            }).execute()
+            print("[GmailService] Token saved to Supabase ✓")
+        except Exception as e:
+            print(f"[GmailService] Could not save token to Supabase: {e}")
+
     def fetch_recent_emails(self, existing_thread_ids: set = None) -> list[dict]:
         """
         Fetch ALL recent emails from inbox (read or unread).
@@ -167,9 +194,6 @@ class GmailService:
             for i, msg in enumerate(all_messages):
                 thread_id = msg.get('threadId', '')
 
-                # If this thread is already in the sheet, return a lightweight stub.
-                # process_emails() will fetch full thread details only when needed for reply updates.
-                # This avoids one expensive API call per already-processed email.
                 if thread_id and thread_id in existing_thread_ids:
                     emails.append({
                         'subject': '',
@@ -181,7 +205,7 @@ class GmailService:
                         'body': '',
                         'thread_id': thread_id,
                         'message_id': msg['id'],
-                        '_stub': True  # Mark so process_emails knows this is a stub
+                        '_stub': True
                     })
                     skipped += 1
                     continue
@@ -191,15 +215,11 @@ class GmailService:
                     email_data['message_id'] = msg['id']
                     emails.append(email_data)
                 
-                # Progress update every 50 emails
                 if (i + 1) % 50 == 0:
                     print(f"[GmailService] Processed {i + 1}/{len(all_messages)} email details...")
             
             print(f"[GmailService] Skipped {skipped} already-in-sheet threads, fetched details for {len(emails) - skipped} new ones")
 
-            # Sort by date sent (oldest first - ascending order)
-            # Stubs have empty date_sent so they sort to front — that's fine,
-            # they'll be handled by the "thread already exists" branch and skipped for insert
             emails.sort(key=lambda x: x.get('date_sent', ''), reverse=False)
             
             return emails
@@ -211,14 +231,6 @@ class GmailService:
     def fetch_emails_by_date_range(self, start_date: str, end_date: str = None, max_results: int = 500) -> list[dict]:
         """
         Fetch emails within a date range (for historical import).
-        
-        Args:
-            start_date: Start date in YYYY/MM/DD format (e.g., "2026/01/01")
-            end_date: End date in YYYY/MM/DD format (optional, defaults to today)
-            max_results: Maximum number of emails to fetch
-            
-        Returns:
-            List of email dictionaries
         """
         from datetime import datetime
         
@@ -227,13 +239,11 @@ class GmailService:
         
         query = f"after:{start_date} before:{end_date} label:{Config.GMAIL_LABEL_FILTER}"
         
-        # Filter for Product Engineering emails only
         if Config.FILTER_PRODUCT_ENGINEERING:
             query += f" (to:{Config.PRODUCT_ENGINEERING_EMAIL} OR cc:{Config.PRODUCT_ENGINEERING_EMAIL})"
         
-        # Exclude specific senders from config
         for ignored_email in Config.IGNORED_EMAILS:
-            if ignored_email.strip():  # Skip empty entries
+            if ignored_email.strip():
                 query += f" -from:{ignored_email.strip()}"
         
         if Config.FILTER_FROM_EMAIL:
@@ -261,11 +271,9 @@ class GmailService:
                 
                 page_token = results.get('nextPageToken')
                 
-                # Stop if we've fetched enough or no more pages
                 if not page_token or len(emails) >= max_results:
                     break
             
-            # Sort by date sent (oldest first - ascending order)
             emails.sort(key=lambda x: x.get('date_sent', ''), reverse=False)
             
             print(f"[GmailService] Fetched {len(emails)} emails from {start_date} to {end_date}")
@@ -278,15 +286,8 @@ class GmailService:
     def fetch_thread_messages(self, thread_id: str) -> list[dict]:
         """
         Fetch all messages in a thread.
-        
-        Args:
-            thread_id: Gmail thread ID
-            
-        Returns:
-            List of email dictionaries sorted by date (oldest first)
         """
         try:
-            # Get thread details — format='full' already contains all message data
             thread = self.service.users().threads().get(
                 userId='me',
                 id=thread_id,
@@ -297,13 +298,9 @@ class GmailService:
             emails = []
             
             for msg in messages:
-                # Parse directly from the already-fetched thread data
-                # DO NOT call _get_email_details(msg['id']) again — that makes
-                # a separate API call per message and silently drops replies on failure
                 try:
                     headers = {h['name']: h['value'] for h in msg['payload']['headers']}
                     
-                    # Parse date
                     from email.utils import parsedate_to_datetime
                     from datetime import datetime
                     date_str = headers.get('Date', '')
@@ -313,7 +310,6 @@ class GmailService:
                     except Exception:
                         date_sent = datetime.now().strftime('%Y-%m-%d')
                     
-                    # Extract body from this message's payload
                     body = self._extract_body(msg['payload'])
                     
                     email_details = {
@@ -330,7 +326,6 @@ class GmailService:
                     emails.append(email_details)
                 except Exception as parse_err:
                     print(f"[GmailService] Could not parse message {msg['id']} in thread, skipping: {parse_err}")
-                    # Still append a stub so the message COUNT stays accurate
                     emails.append({
                         'subject': '',
                         'from': '',
@@ -343,7 +338,6 @@ class GmailService:
                         'message_id': msg['id']
                     })
             
-            # Sort by date (oldest first) to get original email first
             emails.sort(key=lambda x: x.get('date_sent', ''))
             
             print(f"[GmailService] Fetched {len(emails)} messages from thread {thread_id}")
@@ -364,54 +358,41 @@ class GmailService:
             
             headers = {h['name']: h['value'] for h in msg['payload']['headers']}
             
-            # Extract body
             body = self._extract_body(msg['payload'])
             
-            # Parse date (date only, no time)
             date_str = headers.get('Date', '')
             try:
                 dt = parsedate_to_datetime(date_str)
                 date_sent = dt.strftime('%Y-%m-%d')
-                date_received = dt.strftime('%Y-%m-%d')  # Approximate
+                date_received = dt.strftime('%Y-%m-%d')
             except:
                 now = datetime.now()
                 date_sent = now.strftime('%Y-%m-%d')
                 date_received = now.strftime('%Y-%m-%d')
             
-            # Extract all recipients (To + CC + BCC fields)
             to_field = headers.get('To', '')
             cc_field = headers.get('Cc', '')
             bcc_field = headers.get('Bcc', '')
             
-            # Parse and extract email addresses from To, CC, and BCC fields
             def extract_emails(field_value):
                 """Extract clean email addresses from a header field."""
                 if not field_value:
                     return []
-                
                 emails = []
-                # Use regex to properly extract emails from complex formats
                 import re
-                
-                # Pattern to match email addresses in angle brackets or standalone
                 email_pattern = r'<([^>]+)>|([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})'
-                
                 matches = re.findall(email_pattern, field_value)
                 for match in matches:
-                    # match is a tuple: (email_in_brackets, standalone_email)
                     email = match[0] if match[0] else match[1]
                     if email and '@' in email:
                         emails.append(email.strip())
-                
                 return emails
             
-            # Combine all unique recipients from To, CC, and BCC
             all_recipient_emails = []
             all_recipient_emails.extend(extract_emails(to_field))
             all_recipient_emails.extend(extract_emails(cc_field))
             all_recipient_emails.extend(extract_emails(bcc_field))
             
-            # Remove duplicates while preserving order
             seen = set()
             unique_recipients = []
             for email in all_recipient_emails:
@@ -426,7 +407,7 @@ class GmailService:
                 'subject': headers.get('Subject', 'No Subject'),
                 'from': headers.get('From', 'Unknown'),
                 'to': recipients_str,
-                'date': date_sent.split(' ')[0],  # Keep for backward compatibility
+                'date': date_sent.split(' ')[0],
                 'date_sent': date_sent,
                 'date_received': date_received,
                 'body': body,
@@ -456,26 +437,22 @@ class GmailService:
                     if body:
                         break
         
-        # If no plain text found, try the payload body directly
         if not body and 'body' in payload and payload['body'].get('data'):
             raw = base64.urlsafe_b64decode(payload['body']['data']).decode('utf-8')
-            # Check if it's HTML
             if '<html' in raw.lower() or '<div' in raw.lower() or '<p' in raw.lower():
                 html_body = raw
             else:
                 body = raw
         
-        # If still no plain text, convert HTML to plain text
         if not body and html_body:
             body = self._html_to_text(html_body)
         
-        # Clean up excessive whitespace
         import re
-        body = re.sub(r'\n\s*\n\s*\n+', '\n\n', body)  # Collapse 3+ blank lines to 2
-        body = re.sub(r'[ \t]+', ' ', body)  # Collapse multiple spaces/tabs
+        body = re.sub(r'\n\s*\n\s*\n+', '\n\n', body)
+        body = re.sub(r'[ \t]+', ' ', body)
         body = body.strip()
         
-        return body[:5000]  # Limit body length
+        return body[:5000]
     
     def _html_to_text(self, html: str) -> str:
         """Convert HTML email body to clean plain text."""
@@ -483,19 +460,15 @@ class GmailService:
         
         text = html
         
-        # Remove style and script blocks entirely
         text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<script[^>]*>.*?</script>', '', text, flags=re.DOTALL | re.IGNORECASE)
         
-        # Replace common block elements with newlines
         text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
         text = re.sub(r'</(p|div|tr|li|h[1-6])>', '\n', text, flags=re.IGNORECASE)
         text = re.sub(r'<(p|div|tr|li|h[1-6])[^>]*>', '\n', text, flags=re.IGNORECASE)
         
-        # Replace table cells with spaces
         text = re.sub(r'</(td|th)>', ' ', text, flags=re.IGNORECASE)
         
-        # Replace &nbsp; and other HTML entities
         text = text.replace('&nbsp;', ' ')
         text = text.replace('&amp;', '&')
         text = text.replace('&lt;', '<')
@@ -503,17 +476,14 @@ class GmailService:
         text = text.replace('&quot;', '"')
         text = text.replace('&#39;', "'")
         
-        # Remove all remaining HTML tags
         text = re.sub(r'<[^>]+>', '', text)
         
-        # Decode any remaining HTML entities
         try:
             import html
             text = html.unescape(text)
         except:
             pass
         
-        # Clean up whitespace
         text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)
         text = re.sub(r'[ \t]+', ' ', text)
         lines = [line.strip() for line in text.splitlines()]
@@ -537,7 +507,6 @@ class GmailService:
     def add_label(self, message_id: str, label_name: str) -> bool:
         """Add a label to an email (for tracking processed emails)."""
         try:
-            # Get or create label
             label_id = self._get_or_create_label(label_name)
             if label_id:
                 self.service.users().messages().modify(
@@ -558,7 +527,6 @@ class GmailService:
                 if label['name'] == label_name:
                     return label['id']
             
-            # Create label if not exists
             label = self.service.users().labels().create(
                 userId='me',
                 body={'name': label_name}

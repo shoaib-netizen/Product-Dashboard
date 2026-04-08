@@ -46,7 +46,8 @@ class Config:
     
     # Server Configuration
     PORT: int = int(os.getenv("PORT", "10000"))
-    
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
     # Initial Import Mode - set to true for first run to import from Jan 1, 2026
     # After successful import, set to false to only fetch last 7 days
     INITIAL_IMPORT: bool = os.getenv("INITIAL_IMPORT", "false").lower() == "true"
