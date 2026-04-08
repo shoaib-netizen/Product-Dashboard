@@ -57,9 +57,14 @@ class GmailService:
             session.request = request_with_timeout
             creds.refresh(Request(session=session))
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_do_refresh)
-            future.result(timeout=timeout)  # raises TimeoutError if hung
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(_do_refresh)
+        try:
+            future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            executor.shutdown(wait=False)
+            raise
+        executor.shutdown(wait=False)
 
     def _authenticate(self) -> Credentials:
         """Authenticate with Gmail API using OAuth2, persisting token to Supabase."""
