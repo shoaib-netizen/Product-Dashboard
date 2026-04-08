@@ -118,28 +118,38 @@ def _chat_job():
 
 
 def _start_chat_scheduler():
-    """
-    Runs in a daemon thread forever.
-    Calls _chat_job() immediately on startup, then every N minutes.
-    """
-    if not Config.CHAT_SPACE_ID:
-        print("[Chat] CHAT_SPACE_ID not set — chat scheduler disabled.")
-        return
+    try:
+        if not Config.CHAT_SPACE_ID:
+            print("[Chat] CHAT_SPACE_ID not set — chat scheduler disabled.")
+            return
 
-    interval = Config.CHAT_CHECK_INTERVAL_MINUTES
-    print(f"[Chat] Scheduler started. Space: {Config.CHAT_SPACE_ID} | Interval: {interval} min(s).")
+        interval = Config.CHAT_CHECK_INTERVAL_MINUTES
+        print(f"[Chat] Scheduler started. Space: {Config.CHAT_SPACE_ID} | Interval: {interval} min(s).")
 
-    _chat_job()
+        try:
+            _chat_job()
+        except Exception as e:
+            print(f"[Chat] Initial job failed: {e}")
 
-    schedule.every(interval).minutes.do(_chat_job)
+        schedule.every(interval).minutes.do(_chat_job)
 
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+        while True:
+            try:
+                schedule.run_pending()
+            except Exception as e:
+                print(f"[Chat] Schedule error: {e}")
+            time.sleep(30)
+    except Exception as e:
+        print(f"[Chat] Scheduler crashed: {e}")
+        import traceback
+        traceback.print_exc()
 
 
-_chat_thread = threading.Thread(target=_start_chat_scheduler, daemon=True, name="chat-scheduler")
-_chat_thread.start()
+try:
+    _chat_thread = threading.Thread(target=_start_chat_scheduler, daemon=True, name="chat-scheduler")
+    _chat_thread.start()
+except Exception as e:
+    print(f"[Chat] Failed to start scheduler thread: {e}")
 
 
 # ─────────────────────────────────────────────
