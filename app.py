@@ -9,7 +9,9 @@ FIXES APPLIED:
 - Added /reset endpoint to manually unstick processing state
 - Added /process?force=true to force a new run even if stuck
 - Errors from background thread now fully printed with traceback
-- Added lock timeout safety: auto-resets if processing > 10 minutes
+- Added lock timeout safety: auto-resets if processing > 30 minutes
+- Removed signal.alarm (only works on main thread, silently fails in daemon threads)
+- Token refresh timeout is now handled inside GmailService._refresh_with_timeout()
 """
 from flask import Flask, jsonify, request
 from src.services.sheets_service import GoogleSheetsService
@@ -64,13 +66,17 @@ def _run_email_processing():
         if _email_agent is None:
             print("[Email] Initializing EmailToSheetsAgent...")
             from main import EmailToSheetsAgent
+            # NOTE: signal.alarm() is intentionally NOT used here.
+            # signal.alarm only fires on the Python main thread.
+            # In a daemon background thread it is silently ignored.
+            # Token refresh timeout is handled properly inside
+            # GmailService._refresh_with_timeout() using ThreadPoolExecutor.
             _email_agent = EmailToSheetsAgent()
             print("[Email] Agent initialized successfully")
         count = _email_agent.process_emails()
         _last_run = datetime.utcnow()
         _last_result = {'processed': count, 'status': 'success'}
         print(f"[Email] Completed. Processed {count} emails at {_last_run.isoformat()}")
-    # AFTER
     except Exception as e:
         _last_run = datetime.utcnow()
         _last_result = {'error': str(e), 'status': 'failed', 'traceback': traceback.format_exc()}
@@ -219,7 +225,6 @@ def process_emails():
         elapsed = None
         if _processing_started_at:
             elapsed = int((datetime.utcnow() - _processing_started_at).total_seconds())
-        # AFTER
         return jsonify({
             'success': False,
             'status': 'busy',

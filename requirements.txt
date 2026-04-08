@@ -21,4 +21,9 @@ gunicorn>=22.0.0
 pydantic>=2.8.0
 schedule>=1.2.2
 
-supabase>=2.0.0
+# Supabase - upgraded to support httpx>=0.27 (Python 3.14 compatible)
+supabase==2.15.0
+
+# Pin compatible versions for Python 3.14
+httpx>=0.27.0,<1.0.0
+httpcore>=1.0.0,<2.0.0

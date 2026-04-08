@@ -4,7 +4,8 @@ Gmail Service - Handles Gmail API integration for fetching emails.
 import os
 import base64
 import json
-from datetime import datetime
+import concurrent.futures
+from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Optional
 import requests as _requests
@@ -31,12 +32,40 @@ class GmailService:
         self.creds = self._authenticate()
         self.service = build('gmail', 'v1', credentials=self.creds, cache_discovery=False)
         self.processed_label = "PROCESSED_BY_AGENT"
-    
+
+    # ------------------------------------------------------------------
+    # NEW: helper that actually enforces a timeout on creds.refresh()
+    # ------------------------------------------------------------------
+    def _refresh_with_timeout(self, creds, timeout=45):
+        """
+        Refresh credentials with a hard wall-clock timeout.
+
+        WHY: session.timeout=30 on a requests.Session object is silently
+        ignored by google-auth — it only works when passed per-request.
+        signal.alarm() only fires on the main thread, so it is useless
+        inside the background daemon thread where email processing runs.
+        A ThreadPoolExecutor future.result(timeout=N) is the only reliable
+        way to enforce a deadline from any thread.
+        """
+        def _do_refresh():
+            # Pass timeout per-request via a custom Session.request wrapper
+            session = _requests.Session()
+            original_request = session.request
+            def request_with_timeout(method, url, **kwargs):
+                kwargs.setdefault('timeout', 30)
+                return original_request(method, url, **kwargs)
+            session.request = request_with_timeout
+            creds.refresh(Request(session=session))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_do_refresh)
+            future.result(timeout=timeout)  # raises TimeoutError if hung
+
     def _authenticate(self) -> Credentials:
         """Authenticate with Gmail API using OAuth2, persisting token to Supabase."""
         creds = None
 
-        # 1. Try loading from Supabase DB first (production)
+        # 1. Try loading from Supabase DB first (production — always has latest refreshed token)
         token_data = self._load_token_from_db()
         if token_data:
             creds = Credentials.from_authorized_user_info(token_data, Config.GMAIL_SCOPES)
@@ -53,39 +82,53 @@ class GmailService:
             creds = Credentials.from_authorized_user_file(Config.GMAIL_TOKEN_PATH, Config.GMAIL_SCOPES)
             print("[GmailService] Token loaded from token.json file ✓")
 
-        # Refresh if expired
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    session = _requests.Session()
-                    session.timeout = 30
-                    creds.refresh(Request(session=session))
-                    print("[GmailService] Token refreshed successfully ✓")
-                    # Save refreshed token back to Supabase
-                    self._save_token_to_db(json.loads(creds.to_json()))
-                    # Also save locally if in local dev
-                    if not os.getenv("GMAIL_TOKEN_JSON"):
-                        with open(Config.GMAIL_TOKEN_PATH, 'w') as f:
-                            f.write(creds.to_json())
-                except Exception as e:
-                    print(f"[GmailService] Token refresh failed: {e}")
-                    raise RuntimeError(f"Gmail token refresh failed: {e}")
-            else:
-                # Browser flow - local only
-                if os.getenv("RENDER") or (Config.SUPABASE_URL and Config.SUPABASE_KEY):
-                    raise RuntimeError(
-                        "Gmail token invalid/expired with no refresh_token on production. "
-                        "Please regenerate token.json locally and update GMAIL_TOKEN_JSON env var."
-                    )
-                if not os.path.exists(Config.GMAIL_CREDENTIALS_PATH):
-                    raise FileNotFoundError(f"credentials.json not found.")
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    Config.GMAIL_CREDENTIALS_PATH, Config.GMAIL_SCOPES
+        if not creds:
+            raise RuntimeError(
+                "No Gmail credentials found anywhere (Supabase, GMAIL_TOKEN_JSON env, or token.json)."
+            )
+
+        # ------------------------------------------------------------------
+        # Proactive refresh: refresh if already expired OR expiring in <5 min.
+        # This avoids the harder-to-handle "already fully expired" case and
+        # ensures Supabase always has a fresh token for the next run.
+        # ------------------------------------------------------------------
+        needs_refresh = not creds.valid
+        if not needs_refresh and creds.expiry:
+            expiry_utc = (
+                creds.expiry.replace(tzinfo=timezone.utc)
+                if creds.expiry.tzinfo is None
+                else creds.expiry
+            )
+            minutes_left = (expiry_utc - datetime.now(timezone.utc)).total_seconds() / 60
+            if minutes_left < 5:
+                needs_refresh = True
+                print(f"[GmailService] Token expires in {minutes_left:.1f} min — refreshing proactively")
+
+        if needs_refresh:
+            if not creds.refresh_token:
+                raise RuntimeError(
+                    "Gmail token expired and has no refresh_token. "
+                    "Regenerate token.json locally and update the oauth_tokens row in Supabase."
                 )
-                creds = flow.run_local_server(port=0)
+            try:
+                print("[GmailService] Refreshing token (45s hard timeout)...")
+                self._refresh_with_timeout(creds, timeout=45)
+                print("[GmailService] Token refreshed successfully ✓")
+                # Save refreshed token back to Supabase so next run loads it fresh
                 self._save_token_to_db(json.loads(creds.to_json()))
-                with open(Config.GMAIL_TOKEN_PATH, 'w') as f:
-                    f.write(creds.to_json())
+                # Also write locally when running outside Render (local dev)
+                if not os.getenv("RENDER") and not os.getenv("GMAIL_TOKEN_JSON"):
+                    with open(Config.GMAIL_TOKEN_PATH, 'w') as f:
+                        f.write(creds.to_json())
+            except concurrent.futures.TimeoutError:
+                print("[GmailService] ⚠ Token refresh timed out after 45s (Render network issue)")
+                raise RuntimeError(
+                    "Gmail token refresh timed out after 45s. "
+                    "Render network was slow — will auto-retry on next scheduled run."
+                )
+            except Exception as e:
+                print(f"[GmailService] Token refresh failed: {e}")
+                raise RuntimeError(f"Gmail token refresh failed: {e}")
 
         return creds
 

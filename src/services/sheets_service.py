@@ -90,25 +90,27 @@ class GoogleSheetsService:
             )
     
     def _ensure_headers(self):
-        """Ensure headers exist in the first row with proper formatting."""
+        """Ensure headers exist in the first row. Only formats if headers are missing."""
         try:
             first_row = self.sheet.row_values(1)
-            if not first_row or first_row != self.HEADERS:
-                # Update headers
-                self.sheet.update([self.HEADERS], 'A1:N1')
-            
-            # Always apply header formatting
+
+            # Headers already correct — skip ALL formatting calls
+            # Previously: format + freeze + batch_update ran every single hour = caused hangs on Render
+            if first_row == self.HEADERS:
+                return  # Nothing to do, exit early
+
+            # Only reaches here if headers are missing or wrong (first-time setup only)
+            self.sheet.update([self.HEADERS], 'A1:N1')
+
             self.sheet.format('A1:N1', {
-                'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},  # Professional blue
+                'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
                 'horizontalAlignment': 'CENTER',
                 'verticalAlignment': 'MIDDLE'
             })
-            
-            # Freeze header row
+
             self.sheet.freeze(rows=1)
-            
-            # Add filter to header row for easy filtering by date, status, etc.
+
             try:
                 self.sheet.spreadsheet.batch_update({
                     "requests": [{
@@ -117,17 +119,17 @@ class GoogleSheetsService:
                                 "range": {
                                     "sheetId": self.sheet.id,
                                     "startRowIndex": 0,
-                                    "endRowIndex": 1000,  # Cover up to 1000 rows
+                                    "endRowIndex": 1000,
                                     "startColumnIndex": 0,
-                                    "endColumnIndex": 14   # All 14 columns (A-N)
+                                    "endColumnIndex": 14
                                 }
                             }
                         }
                     }]
                 })
-                print(f"[SheetsService] Headers formatted with filter enabled")
-            except Exception as filter_error:
-                print(f"[SheetsService] Headers formatted (filter may already exist)")
+                print(f"[SheetsService] Headers set with filter enabled")
+            except Exception:
+                print(f"[SheetsService] Headers set (filter may already exist)")
         except Exception as e:
             print(f"[SheetsService] Header setup: {e}")
             self.sheet.update([self.HEADERS], 'A1:N1')
