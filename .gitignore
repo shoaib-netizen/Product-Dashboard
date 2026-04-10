@@ -54,3 +54,4 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+chat_token.json
