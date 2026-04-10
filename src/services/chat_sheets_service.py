@@ -36,6 +36,13 @@ class ChatSheetsService:
     """Service for interacting with Google Sheets for Chat messages."""
 
     # Define the headers for the chat messages sheet
+    #
+    # A ninth column, ``Replied By``, has been added to track which users
+    # responded to the original message.  This value is a comma‑separated list
+    # of names or user identifiers of anyone who quoted/replied to the
+    # message.  When no reply exists, the cell will remain blank.  The
+    # ``Status`` column is still used to indicate whether at least one reply
+    # exists (``Replied`` vs. ``Not Replied``).
     HEADERS = [
         "SN",
         "Message ID",
@@ -45,6 +52,7 @@ class ChatSheetsService:
         "Date",
         "Time",
         "Status",
+        "Replied By",
     ]
 
     def __init__(self):
@@ -99,10 +107,13 @@ class ChatSheetsService:
         try:
             first_row = self.sheet.row_values(1)
             if not first_row or first_row != self.HEADERS:
-                self.sheet.update([self.HEADERS], 'A1:H1')
+                # Update header range to include the new "Replied By" column (column I)
+                end_col = chr(ord('A') + len(self.HEADERS) - 1)
+                self.sheet.update([self.HEADERS], f'A1:{end_col}1')
 
             # Apply header formatting: professional blue background, white bold text
-            self.sheet.format('A1:H1', {
+            end_col = chr(ord('A') + len(self.HEADERS) - 1)
+            self.sheet.format(f'A1:{end_col}1', {
                 'backgroundColor': {'red': 0.27, 'green': 0.51, 'blue': 0.71},
                 'textFormat': {'bold': True, 'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}, 'fontSize': 11},
                 'horizontalAlignment': 'CENTER',
@@ -110,8 +121,32 @@ class ChatSheetsService:
             })
             # Freeze header row
             self.sheet.freeze(rows=1)
+            # Wrap text in Replied By column so multiple names stay inside cell
+            try:
+                self.sheet.spreadsheet.batch_update({
+                    "requests": [{
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": self.sheet.id,
+                                "startRowIndex": 1,
+                                "endRowIndex": 1000,
+                                "startColumnIndex": 8,  # Column I
+                                "endColumnIndex": 9,
+                            },
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "wrapStrategy": "WRAP",
+                                    "verticalAlignment": "TOP",
+                                }
+                            },
+                            "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)",
+                        }
+                    }]
+                })
+            except Exception:
+                pass
 
-            # Apply filter over entire range
+            # Apply filter over entire range (including the Replied By column)
             try:
                 self.sheet.spreadsheet.batch_update({
                     "requests": [{
@@ -147,6 +182,7 @@ class ChatSheetsService:
                 ("F", 130),  # Date
                 ("G", 80),   # Time
                 ("H", 130),  # Status
+                ("I", 450),  # Replied By
             ]
             requests = []
             for letter, width in column_widths:
@@ -171,7 +207,7 @@ class ChatSheetsService:
                         "startRowIndex": 0,
                         "endRowIndex": 1000,
                         "startColumnIndex": 0,
-                        "endColumnIndex": len(self.HEADERS),
+                "endColumnIndex": len(self.HEADERS),
                     },
                     "top": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
                     "bottom": {"style": "SOLID", "width": 1, "color": {"red": 0.8, "green": 0.8, "blue": 0.8}},
@@ -196,14 +232,15 @@ class ChatSheetsService:
             print(f"[ChatSheetsService] Could not fetch existing message IDs: {e}")
             return set()
 
-    def append_messages(self, messages: List[Dict[str, str]], replied_message_ids: set = None) -> int:
+    def append_messages(self, messages: List[Dict[str, str]], reply_map: Optional[Dict[str, set]] = None) -> int:
         """Append new chat messages to the sheet, skipping duplicates.
 
         Args:
             messages: List of message dictionaries produced by
                 ``GoogleChatService.fetch_messages``.
-            replied_threads: Set of thread names that have received a reply
-                from a non-allowed user.
+            reply_map: Mapping of message IDs to sets of reply sender names.  If
+                provided, this will be used to populate the ``Status`` and
+                ``Replied By`` columns.
 
         Returns:
             The number of rows appended to the sheet.
@@ -211,11 +248,12 @@ class ChatSheetsService:
         if not messages:
             return 0
 
-        if replied_message_ids is None:
-            replied_message_ids = set()
+        # Default to empty mapping if none provided
+        if reply_map is None:
+            reply_map = {}
 
         existing_ids = self._get_existing_message_ids()
-        rows_to_add = []
+        rows_to_add: List[List[str]] = []
 
         # Determine current SN by counting existing rows (excluding header)
         try:
@@ -239,17 +277,21 @@ class ChatSheetsService:
                 "Ali Sheikh": "alis@onescreensolutions.com",
             }
             sender_email = EMAIL_MAP.get(sender_name, "")
-            msg_id = msg.get("message_id", "")
-            status = "Replied" if msg_id and msg_id in replied_message_ids else "Not Replied"
+            # Determine status and list of reply names
+            reply_names_set = reply_map.get(msg_id, set())
+            status = "Replied" if reply_names_set else "Not Replied"
+            # Convert set of names to a comma‑separated string in a deterministic order
+            replied_by = ", ".join(sorted(reply_names_set)) if reply_names_set else ""
             row = [
-                str(sn_counter),        # SN
-                msg_id,                 # Message ID
-                sender_name or "",      # Sender Name
-                sender_email,           # Sender Email
-                msg.get("text", ""),    # Message
-                msg.get("date", ""),    # Date
-                msg.get("time", ""),    # Time
-                status,                 # Status
+                str(sn_counter),       # SN
+                msg_id or "",          # Message ID
+                sender_name or "",     # Sender Name
+                sender_email,          # Sender Email
+                msg.get("text", ""),   # Message
+                msg.get("date", ""),   # Date
+                msg.get("time", ""),   # Time
+                status,                # Status (Replied / Not Replied)
+                replied_by,            # Replied By (comma‑separated names)
             ]
             rows_to_add.append(row)
             sn_counter += 1
@@ -264,6 +306,7 @@ class ChatSheetsService:
             end_row = start_row + len(rows_to_add) - 1
             self._add_status_dropdown(start_row, end_row)
             self._apply_status_colors(start_row, end_row, rows_to_add)
+            self._apply_replied_by_wrap(start_row, end_row)
         except Exception as e:
             print(f"[ChatSheetsService] Error appending rows: {e}")
             return 0
@@ -334,39 +377,118 @@ class ChatSheetsService:
             try:
                 self.sheet.spreadsheet.batch_update({"requests": requests})
             except Exception as e:
-                print(f"[ChatSheetsService] Color formatting error: {e}") 
+                print(f"[ChatSheetsService] Color formatting error: {e}")
 
 
-    def update_reply_statuses(self, replied_message_ids: set) -> int:
-        """Update Status column for existing rows that have now been replied to."""
-        if not replied_message_ids:
+    def _apply_replied_by_wrap(self, start_row: int, end_row: int) -> None:
+        """Enable text wrap on Replied By column so multiple names stay inside cell."""
+        try:
+            self.sheet.spreadsheet.batch_update({
+                "requests": [{
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": self.sheet.id,
+                            "startRowIndex": start_row - 1,
+                            "endRowIndex": end_row,
+                            "startColumnIndex": 8,  # Column I
+                            "endColumnIndex": 9,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "wrapStrategy": "WRAP",
+                                "verticalAlignment": "TOP",
+                            }
+                        },
+                        "fields": "userEnteredFormat(wrapStrategy,verticalAlignment)",
+                    }
+                }]
+            })
+        except Exception as e:
+            print(f"[ChatSheetsService] Wrap formatting error: {e}")
+
+    def update_reply_statuses(self, reply_map: Dict[str, set]) -> int:
+        """Update Status and Replied By columns for existing rows.
+
+        Args:
+            reply_map: Mapping of message IDs to sets of names that replied to that message.
+
+        Returns:
+            The number of rows updated.
+        """
+        if not reply_map:
             return 0
 
         try:
-            msg_ids = self.sheet.col_values(2)[1:]   # Column B, skip header
-            statuses = self.sheet.col_values(8)[1:]  # Column H, skip header
+            msg_ids = self.sheet.col_values(2)[1:]       # Column B, skip header
+            statuses = self.sheet.col_values(8)[1:]      # Column H, skip header
+            replied_bys = self.sheet.col_values(9)[1:]   # Column I, skip header
         except Exception as e:
             print(f"[ChatSheetsService] Could not read sheet: {e}")
             return 0
 
-        batch_updates = []
-        for i, (msg_id, status) in enumerate(zip(msg_ids, statuses), start=2):
-            if status == "Not Replied" and msg_id in replied_message_ids:
-                batch_updates.append({
-                    "range": f"'{self.sheet.title}'!H{i}",
-                    "values": [["Replied"]],
-                })
+        # Pad shorter lists so zip doesn't stop early on rows missing column I
+        max_len = len(msg_ids)
+        statuses = statuses + [""] * (max_len - len(statuses))
+        replied_bys = replied_bys + [""] * (max_len - len(replied_bys))
 
-        if not batch_updates:
+        updates: List[Dict[str, any]] = []
+        updated_count = 0
+        for row_index, (msg_id, status, current_replied_by) in enumerate(zip(msg_ids, statuses, replied_bys), start=2):
+            if not msg_id or msg_id not in reply_map:
+                continue
+            # Determine new status and reply string
+            names_set = reply_map.get(msg_id, set())
+            new_status = "Replied" if names_set else "Not Replied"
+            new_replied_by = ", ".join(sorted(names_set)) if names_set else ""
+            row_updates = []
+            # Update status if changed
+            if status != new_status:
+                row_updates.append({
+                    "range": f"'{self.sheet.title}'!H{row_index}",
+                    "values": [[new_status]],
+                })
+            # Update replied by if changed
+            if current_replied_by != new_replied_by:
+                row_updates.append({
+                    "range": f"'{self.sheet.title}'!I{row_index}",
+                    "values": [[new_replied_by]],
+                })
+            if row_updates:
+                updates.extend(row_updates)
+                updated_count += 1
+
+        if not updates:
             return 0
 
         try:
             self.sheet.spreadsheet.values_batch_update({
                 "valueInputOption": "USER_ENTERED",
-                "data": batch_updates,
+                "data": updates,
             })
         except Exception as e:
             print(f"[ChatSheetsService] Error updating reply statuses: {e}")
             return 0
 
-        return len(batch_updates)
+        # Re-apply status colours to updated rows
+        try:
+            # Determine which rows had their Status updated (i.e., range targets column H)
+            colored_rows: set[int] = set()
+            for upd in updates:
+                rng = upd["range"]
+                # Extract column letter and row number (e.g. 'Sheet'!H5)
+                cell_ref = rng.split("!")[-1]
+                col_letter = cell_ref[0]
+                row_num = int(cell_ref[1:])
+                if col_letter == "H":
+                    colored_rows.add(row_num)
+            for row_num in colored_rows:
+                # Determine new status for this row
+                idx = row_num - 2  # msg_ids list index
+                msg_id = msg_ids[idx] if idx < len(msg_ids) else ""
+                status = "Replied" if msg_id in reply_map and reply_map.get(msg_id) else "Not Replied"
+                row_data = [[None]*7 + [status]]
+                self._apply_status_colors(row_num, row_num, row_data)
+        except Exception:
+            pass
+
+        return updated_count

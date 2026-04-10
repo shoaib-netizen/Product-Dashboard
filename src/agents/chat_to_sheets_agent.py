@@ -77,17 +77,18 @@ class ChatToSheetsAgent:
             return 0
 
         logger.info(f"Fetched {len(messages)} chat message(s) after filtering allowed senders")
-        logger.info("Checking reply statuses...")
-        replied_message_ids = self.chat_service.fetch_replied_message_ids()
-        logger.info(f"Found {len(replied_message_ids)} message(s) that have been replied to")
+        logger.info("Checking reply statuses and mapping reply authors...")
+        # Build a mapping of message IDs to the names of users who replied to them
+        reply_map = self.chat_service.fetch_reply_map()
+        logger.info(f"Found {len(reply_map)} messages with one or more replies")
 
-        # Insert new messages
-        inserted = self.sheets_service.append_messages(messages, replied_message_ids=replied_message_ids)
+        # Insert new messages, passing the full reply map so Status and Replied By columns are populated
+        inserted = self.sheets_service.append_messages(messages, reply_map=reply_map)
         logger.info(f"Inserted {inserted} new chat message(s) into sheet '{Config.CHAT_SHEET_NAME}'")
 
-        # Update existing rows that were previously Not Replied but now have a reply
-        updated = self.sheets_service.update_reply_statuses(replied_message_ids)
+        # Update existing rows (Status and Replied By) for messages that now have replies
+        updated = self.sheets_service.update_reply_statuses(reply_map)
         if updated:
-            logger.info(f"Updated {updated} existing message(s) from 'Not Replied' to 'Replied'")
+            logger.info(f"Updated {updated} existing message(s) with reply information")
 
         return inserted

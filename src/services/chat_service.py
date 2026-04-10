@@ -35,13 +35,20 @@ except ImportError:
 
 # ---------------------------------------------------------------------------
 # Hardcoded user ID → display name mapping.
+#
 # The Google Chat API does not return displayName for space members with
-# this OAuth setup, so we match by numeric user ID instead.
-# To add or remove a person, simply add/remove their entry here.
+# this OAuth setup, so we match by numeric user ID instead.  The mapping
+# is loaded from the ``CHAT_ALLOWED_USERS`` environment variable for
+# messages we record (allowed senders).  Additional mappings for other
+# product engineering members are specified in ``EXTRA_REPLY_USERS``.
+# You can modify these dictionaries to reflect your team members.  When
+# adding new entries, ensure the key matches the ``sender.name`` field
+# returned by the Chat API (for example ``users/123456789``) and the
+# value is the desired display name.
 # ---------------------------------------------------------------------------
 def _load_allowed_users() -> dict:
     raw = os.getenv("CHAT_ALLOWED_USERS", "")
-    result = {}
+    result: Dict[str, str] = {}
     for entry in raw.split(","):
         entry = entry.strip()
         if ":" in entry:
@@ -49,7 +56,30 @@ def _load_allowed_users() -> dict:
             result[user_id.strip()] = name.strip()
     return result
 
-ALLOWED_USER_IDS = _load_allowed_users()
+# Primary mapping for allowed senders (those whose messages are captured)
+ALLOWED_USER_IDS: Dict[str, str] = _load_allowed_users()
+
+# Additional user ID → display name mapping for members who may reply to
+# allowed messages.  Populate this with the rest of your product
+# engineering team so that the ``Replied By`` column can list friendly
+# names instead of raw user identifiers.  The values below are
+# best‑effort guesses based on provided chat transcripts – please
+# update them to match your actual team members if necessary.
+EXTRA_REPLY_USERS: Dict[str, str] = {
+    # Example: "users/1234567890": "Faizan Ahmed",
+    # The mappings below were deduced from the provided message samples.
+    "users/114555469172937694494": "Faizan Ahmed",
+    "users/111981330800083302207": "Abdullah",
+    "users/114164993079105467419": "Asfandyar",
+    "users/110418653043728516378": "Huzaifa",
+    "users/101546961597035520125": "Abdul Fatir",
+    "users/104034053697853611804": "Zayn Mir",
+
+
+}
+
+# Combine allowed and extra mappings into a unified map for lookup
+USER_ID_NAME_MAP: Dict[str, str] = {**ALLOWED_USER_IDS, **EXTRA_REPLY_USERS}
 
 
 class GoogleChatService:
@@ -183,7 +213,121 @@ class GoogleChatService:
             A human-readable name string.
         """
         user_id = sender.get("name", "Unknown")
-        return ALLOWED_USER_IDS.get(user_id, user_id)
+        return USER_ID_NAME_MAP.get(user_id, user_id)
+
+    def fetch_reply_map(self, days: int = 7) -> Dict[str, set]:
+        """Return a mapping of message IDs to the names of users who replied.
+
+        Groups messages by thread.name. The first allowed-sender message in
+        each thread is the original. All subsequent messages from non-allowed
+        users in the same thread are counted as replies. Also handles explicit
+        quoted replies via quotedMessageMetadata as a fallback.
+
+        Args:
+            days: Number of days of history to scan for replies.  Defaults
+                to 7.  If ``CHAT_INITIAL_IMPORT`` is True then all history
+                will be scanned.
+
+        Returns:
+            A dictionary mapping the message ID of the original message
+            (e.g. ``spaces/AAA.../messages/123``) to a set of names of
+            users who replied to it.
+        """
+        from collections import defaultdict
+
+        thread_messages: Dict[str, list] = defaultdict(list)
+        quoted_reply_map: Dict[str, set] = defaultdict(set)
+
+        if Config.CHAT_INITIAL_IMPORT:
+            filter_expr = 'createTime > "2020-01-01T00:00:00Z"'
+        else:
+            start = datetime.now(timezone.utc) - timedelta(days=days)
+            filter_expr = f'createTime > "{start.strftime("%Y-%m-%dT%H:%M:%SZ")}"'
+
+        next_page: Optional[str] = None
+        while True:
+            try:
+                resp = (
+                    self.service.spaces()
+                    .messages()
+                    .list(
+                        parent=f"spaces/{Config.CHAT_SPACE_ID}",
+                        pageSize=100,
+                        pageToken=next_page,
+                        filter=filter_expr,
+                        orderBy="createTime ASC",
+                        showDeleted=False,
+                    )
+                    .execute()
+                )
+            except Exception as e:
+                print(f"[ChatService] Error fetching reply data: {e}")
+                break
+
+            for msg in resp.get("messages", []):
+                sender_id = msg.get("sender", {}).get("name", "")
+
+                # Group every message by its thread
+                thread_name = msg.get("thread", {}).get("name", "")
+                if thread_name:
+                    thread_messages[thread_name].append(msg)
+
+                # Also capture explicit quoted replies as bonus fallback
+                quoted = msg.get("quotedMessageMetadata", {})
+                quoted_msg_id = quoted.get("name", "")
+                if quoted_msg_id and sender_id not in ALLOWED_USER_IDS:
+                    reply_name = USER_ID_NAME_MAP.get(sender_id, sender_id)
+                    quoted_reply_map[quoted_msg_id].add(reply_name)
+
+            next_page = resp.get("nextPageToken")
+            if not next_page:
+                break
+
+        # Build reply_map from thread groupings
+        reply_map: Dict[str, set] = defaultdict(set)
+
+        for thread_name, msgs in thread_messages.items():
+            # Find the first allowed-user message in this thread = the original
+            original_msg_id = None
+            for msg in msgs:
+                sender_id = msg.get("sender", {}).get("name", "")
+                if sender_id in ALLOWED_USER_IDS:
+                    original_msg_id = msg.get("name", "")
+                    break
+
+            if not original_msg_id:
+                continue
+
+            # Find the original sender ID to skip self-replies
+            original_sender_id = None
+            for m in msgs:
+                if m.get("name", "") == original_msg_id:
+                    original_sender_id = m.get("sender", {}).get("name", "")
+                    break
+
+            # Every other message in this thread = a reply
+            # Includes CHAT_ALLOWED_USERS members replying to each other
+            for msg in msgs:
+                msg_id = msg.get("name", "")
+                sender_id = msg.get("sender", {}).get("name", "")
+
+                # Skip the original message itself
+                if msg_id == original_msg_id:
+                    continue
+
+                # Skip if the same person is replying to their own message
+                if sender_id == original_sender_id:
+                    continue
+
+                reply_name = USER_ID_NAME_MAP.get(sender_id, sender_id)
+                reply_map[original_msg_id].add(reply_name)
+
+        # Merge explicit quoted replies into thread-based reply_map
+        for orig_id, names in quoted_reply_map.items():
+            reply_map[orig_id].update(names)
+
+        return dict(reply_map)
+
     def fetch_replied_message_ids(self) -> set:
         """Return message IDs that have been directly replied to by non-allowed users.
 
