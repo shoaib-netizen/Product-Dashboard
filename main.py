@@ -47,11 +47,18 @@ class EmailToSheetsAgent:
         
         # Initialize components
         logger.info("Step 1: Initializing Gmail...")
+        logger.info("Step 1: Initializing Gmail...")
         self.gmail = GmailService()
         logger.info("Step 1 done ✓")
         
         logger.info("Step 2: Initializing Parser...")
+        logger.info("Step 1 done ✓")
+        
+        logger.info("Step 2: Initializing Parser...")
         self.parser = EmailParserAgent()
+        logger.info("Step 2 done ✓")
+        
+        logger.info("Step 3: Initializing Sheets...")
         logger.info("Step 2 done ✓")
         
         logger.info("Step 3: Initializing Sheets...")
