@@ -663,7 +663,7 @@ class GoogleSheetsService:
                 task.status
             ]
             
-            self.sheet.append_row(row, value_input_option='USER_ENTERED')
+            self.sheet.append_row(row, value_input_option='RAW')
             
             print(f"[SheetsService] Added task SN#{sn}: {task.email_subject[:50]}...")
             return True
@@ -828,7 +828,7 @@ class GoogleSheetsService:
         
         try:
             if rows:
-                self.sheet.append_rows(rows, value_input_option='USER_ENTERED')
+                self.sheet.append_rows(rows, value_input_option='RAW')
                 success_count = len(rows)
                 print(f"[SheetsService] Added {success_count} tasks in batch")
         except Exception as e:

@@ -308,6 +308,14 @@ class EmailToSheetsAgent:
                     logger.warning(f"  ✗ Failed to parse email, skipping")
                     continue
 
+                # Skip if original sender is in IGNORED_EMAILS
+                _, orig_sender_email = parseaddr(orig_sender)
+                orig_sender_email = orig_sender_email.lower().strip()
+                ignored = [e.strip().lower() for e in Config.IGNORED_EMAILS if e.strip()]
+                if orig_sender_email in ignored:
+                    logger.info(f"  → Skipping: sender {orig_sender_email} is in IGNORED_EMAILS")
+                    continue
+
                 # Set origin type based on original sender
                 original_task.origin_type = self._determine_origin_type(orig_sender)
                 logger.info(f"  → Origin Type: {original_task.origin_type}")
