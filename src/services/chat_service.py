@@ -215,7 +215,7 @@ class GoogleChatService:
         user_id = sender.get("name", "Unknown")
         return USER_ID_NAME_MAP.get(user_id, user_id)
 
-    def fetch_reply_map(self, days: int = 7) -> Dict[str, set]:
+    def fetch_reply_map(self, days: int = 2) -> Dict[str, set]:
         """Return a mapping of message IDs to the names of users who replied.
 
         Groups messages by thread.name. The first allowed-sender message in
@@ -346,7 +346,7 @@ class GoogleChatService:
                         parent=f"spaces/{Config.CHAT_SPACE_ID}",
                         pageSize=100,
                         pageToken=next_page,
-                        filter=f'createTime > "{(datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")}"',
+                        filter=f'createTime > "{(datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ")}"',
                         orderBy="createTime ASC",
                         showDeleted=False,
                     )
@@ -409,8 +409,8 @@ class GoogleChatService:
             if Config.CHAT_INITIAL_IMPORT:
                 start_date = "2020-01-01"
             else:
-                # Last 7 days
-                start_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                # Last 2 days
+                start_date = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
 
         # Build filter expression
         filter_expr = self._build_time_filter(start_date, end_date)

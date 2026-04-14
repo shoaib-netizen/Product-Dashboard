@@ -195,7 +195,7 @@ class GmailService:
             start_date = "2026/01/01"
             print(f"[GmailService] INITIAL_IMPORT mode: fetching ALL from {start_date}")
         else:
-            start_date = (datetime.now() - timedelta(days=7)).strftime('%Y/%m/%d')
+            start_date = (datetime.now() - timedelta(days=2)).strftime('%Y/%m/%d')
             print(f"[GmailService] Normal mode: fetching ALL from {start_date}")
         
         # Fetch ALL emails (read or unread) - we'll filter by what's in the sheet later
