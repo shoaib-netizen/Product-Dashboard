@@ -353,10 +353,13 @@ class GmailService:
                     from datetime import datetime
                     date_str = headers.get('Date', '')
                     try:
+                        from datetime import timezone, timedelta
+                        PKT = timezone(timedelta(hours=5))
                         dt = parsedate_to_datetime(date_str)
-                        date_sent = dt.strftime('%Y-%m-%d')
+                        date_sent = dt.astimezone(PKT).strftime('%Y-%m-%d')
                     except Exception:
-                        date_sent = datetime.now().strftime('%Y-%m-%d')
+                        from datetime import timezone, timedelta
+                        date_sent = datetime.now(timezone(timedelta(hours=5))).strftime('%Y-%m-%d')
                     
                     body = self._extract_body(msg['payload'])
                     
@@ -410,11 +413,14 @@ class GmailService:
             
             date_str = headers.get('Date', '')
             try:
+                from datetime import timezone, timedelta
+                PKT = timezone(timedelta(hours=5))
                 dt = parsedate_to_datetime(date_str)
-                date_sent = dt.strftime('%Y-%m-%d')
-                date_received = dt.strftime('%Y-%m-%d')
+                dt_pkt = dt.astimezone(PKT)
+                date_sent = dt_pkt.strftime('%Y-%m-%d')
+                date_received = dt_pkt.strftime('%Y-%m-%d')
             except:
-                now = datetime.now()
+                now = datetime.now(timezone(timedelta(hours=5)))
                 date_sent = now.strftime('%Y-%m-%d')
                 date_received = now.strftime('%Y-%m-%d')
             
